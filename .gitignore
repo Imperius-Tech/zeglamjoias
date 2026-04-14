@@ -4,3 +4,6 @@ dist
 *.local
 .next
 *.tsbuildinfo
+.env
+.env.local
+.env.production

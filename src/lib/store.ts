@@ -8,6 +8,9 @@ import type {
   Message,
   CategoryKey,
 } from './mock-data';
+import { conversations as mockConversations, knowledgeEntries as mockKnowledge } from './mock-data';
+
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
 interface DashboardState {
   conversations: Conversation[];
@@ -41,6 +44,11 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   loading: true,
 
   loadConversations: async () => {
+    if (DEMO_MODE) {
+      set({ conversations: mockConversations, loading: false });
+      return;
+    }
+
     const { data: convos } = await supabase
       .from('conversations')
       .select('*')
@@ -84,6 +92,11 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   },
 
   loadKnowledgeEntries: async () => {
+    if (DEMO_MODE) {
+      set({ knowledgeEntries: mockKnowledge });
+      return;
+    }
+
     const { data } = await supabase
       .from('knowledge_entries')
       .select('*')
@@ -182,6 +195,11 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   },
 
   subscribeRealtime: () => {
+    // No realtime in demo mode
+    if (DEMO_MODE) {
+      return () => {};
+    }
+
     // Listen for new messages
     const msgChannel = supabase
       .channel('messages-realtime')

@@ -8,6 +8,7 @@ import ClientesPage from '@/pages/ClientesPage';
 import ComprovantesPage from '@/pages/ComprovantesPage';
 import ConfiguracoesPage from '@/pages/ConfiguracoesPage';
 import PlaceholderPage from '@/pages/PlaceholderPage';
+import LoginPage from '@/pages/LoginPage';
 
 export default function App() {
   const loadConversations = useDashboardStore((s) => s.loadConversations);
@@ -23,27 +24,34 @@ export default function App() {
 
   return (
     <div className="noise">
-      <DashboardShell>
-        <Routes>
-          <Route path="/" element={<Navigate to="/conversas" replace />} />
-          <Route path="/conversas" element={<ConversasPage />} />
-          <Route path="/conhecimento" element={<ConhecimentoPage />} />
-          <Route path="/clientes" element={<ClientesPage />} />
-          <Route path="/comprovantes" element={<ComprovantesPage />}
-          />
-          <Route
-            path="/metricas"
-            element={
-              <PlaceholderPage
-                title="Métricas"
-                description="Em breve, acompanhe métricas de atendimento, taxa de resolução da IA, tempo de resposta e satisfação dos clientes."
-                icon="BarChart3"
-              />
-            }
-          />
-          <Route path="/configuracoes" element={<ConfiguracoesPage />} />
-        </Routes>
-      </DashboardShell>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route 
+          path="/*" 
+          element={
+            <DashboardShell>
+              <Routes>
+                <Route path="/" element={<Navigate to="/conversas" replace />} />
+                <Route path="/conversas" element={<ConversasPage />} />
+                <Route path="/conhecimento" element={<ConhecimentoPage />} />
+                <Route path="/clientes" element={<ClientesPage />} />
+                <Route path="/comprovantes" element={<ComprovantesPage />} />
+                <Route
+                  path="/metricas"
+                  element={
+                    <PlaceholderPage
+                      title="Métricas"
+                      description="Em breve, acompanhe métricas de atendimento, taxa de resolução da IA, tempo de resposta e satisfação dos clientes."
+                      icon="BarChart3"
+                    />
+                  }
+                />
+                <Route path="/configuracoes" element={<ConfiguracoesPage />} />
+              </Routes>
+            </DashboardShell>
+          } 
+        />
+      </Routes>
     </div>
   );
 }

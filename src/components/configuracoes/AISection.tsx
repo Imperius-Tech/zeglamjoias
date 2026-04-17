@@ -83,7 +83,7 @@ export function AISection({ data, onSave }: { data: AISettings; onSave: (d: AISe
           padding: 20, borderRadius: 14, background: 'var(--glass)',
           border: '1px solid var(--border)', marginBottom: 24,
         }}>
-          <p style={{ fontSize: 13, fontWeight: 600, color: '#fff', marginBottom: 16 }}>Configuração da IA</p>
+          <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)', marginBottom: 16 }}>Configuração da IA</p>
 
           <FieldGroup label="Provider" description="Escolha o provedor de IA">
             <div style={{ display: 'flex', gap: 8 }}>
@@ -94,7 +94,7 @@ export function AISection({ data, onSave }: { data: AISettings; onSave: (d: AISe
                   style={{
                     flex: 1, padding: '10px 16px', borderRadius: 10, fontSize: 13, fontWeight: 600,
                     cursor: 'pointer', transition: 'all 0.15s', textAlign: 'center',
-                    color: aiConfig.provider === p ? '#fff' : 'var(--fg-muted)',
+                    color: aiConfig.provider === p ? 'var(--strong-text)' : 'var(--fg-muted)',
                     background: aiConfig.provider === p ? (p === 'gemini' ? 'rgba(66,133,244,0.15)' : 'rgba(16,185,129,0.15)') : 'var(--surface-2)',
                     border: aiConfig.provider === p ? `1px solid ${p === 'gemini' ? 'rgba(66,133,244,0.3)' : 'rgba(16,185,129,0.3)'}` : '1px solid var(--border)',
                   }}
@@ -171,7 +171,7 @@ export function AISection({ data, onSave }: { data: AISettings; onSave: (d: AISe
         padding: 20, borderRadius: 14, background: 'var(--glass)',
         border: '1px solid var(--border)', marginBottom: 24,
       }}>
-        <p style={{ fontSize: 13, fontWeight: 600, color: '#fff', marginBottom: 12 }}>Encaminhar para humano quando:</p>
+        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)', marginBottom: 12 }}>Encaminhar para humano quando:</p>
         <Toggle checked={form.escalateUnknown} onChange={(v) => update('escalateUnknown', v)} label="IA não sabe responder" />
         <Toggle checked={form.escalateHumanRequest} onChange={(v) => update('escalateHumanRequest', v)} label="Cliente pede atendente humano" />
         <Toggle checked={form.escalateKeyword} onChange={(v) => update('escalateKeyword', v)} label="Palavra-chave detectada (ex: reclamação, problema)" />

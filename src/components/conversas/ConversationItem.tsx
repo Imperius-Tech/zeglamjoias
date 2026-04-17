@@ -62,7 +62,7 @@ export function ConversationItem({ conversation: c, isActive, onClick }: { conve
         width: 40, minWidth: 40, height: 40, borderRadius: 20,
         background: pickGradient(c.customerName),
         display: c.profilePicUrl ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 15, fontWeight: 700, color: '#fff',
+        fontSize: 15, fontWeight: 700, color: 'var(--strong-text)',
         flexShrink: 0,
       }}>
         {c.customerName[0]?.toUpperCase()}
@@ -70,23 +70,66 @@ export function ConversationItem({ conversation: c, isActive, onClick }: { conve
 
       {/* Content */}
       <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-        {/* Row 1: Name + time */}
+        {/* Row 1: Name + Status + Time */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <span className="truncate" style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>{c.customerName}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <span className="truncate" style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)' }}>{c.customerName}</span>
+            
+            {/* Type Status: P (Pessoal) or N (Negócio) */}
+            {c.conversationType === 'personal' && (
+              <span style={{ 
+                fontSize: 9, padding: '1px 5px', borderRadius: 4, 
+                background: 'rgba(139,92,246,0.15)', color: '#a78bfa', fontWeight: 900,
+                flexShrink: 0
+              }}>P</span>
+            )}
+            {c.conversationType === 'business' && (
+              <span style={{ 
+                fontSize: 9, padding: '1px 5px', borderRadius: 4, 
+                background: 'rgba(16,185,129,0.15)', color: 'var(--emerald-light)', fontWeight: 900,
+                flexShrink: 0
+              }}>N</span>
+            )}
+
+            {/* Interest Tags */}
+            {c.aiAnalysis?.interesse_produtos?.slice(0, 1).map((p: string) => (
+              <span key={p} style={{ 
+                fontSize: 9, padding: '1px 6px', borderRadius: 4, 
+                background: 'rgba(212,175,55,0.12)', color: '#d4af37', fontWeight: 600,
+                flexShrink: 0, border: '1px solid rgba(212,175,55,0.2)'
+              }}>{p}</span>
+            ))}
+            {/* New badge */}
+            {c.messages.length < 3 && (
+              <span style={{ 
+                fontSize: 8, padding: '1px 4px', borderRadius: 3, 
+                background: 'var(--accent)', color: '#fff', fontWeight: 800,
+                textTransform: 'uppercase', flexShrink: 0 
+              }}>Novo</span>
+            )}
+          </div>
           <span style={{ fontSize: 11, color: 'var(--fg-subtle)', flexShrink: 0, whiteSpace: 'nowrap' }}>
-            {formatDistanceToNow(c.lastMessageAt, { addSuffix: true, locale: ptBR })}
+            {formatDistanceToNow(c.lastMessageAt, { addSuffix: false, locale: ptBR })}
           </span>
         </div>
-        {/* Row 2: Last message */}
-        <p className="truncate" style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 3 }}>{last?.content}</p>
-        {/* Row 3: Status + unread */}
+
+        {/* Row 2: AI Summary or Last Message */}
+        {c.aiAnalysis?.resumo ? (
+          <p className="truncate" style={{ 
+            fontSize: 11, color: 'var(--accent)', marginTop: 3, 
+            fontWeight: 500, fontStyle: 'italic', opacity: 0.9 
+          }}>
+            {c.aiAnalysis.resumo}
+          </p>
+        ) : (
+          <p className="truncate" style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 3 }}>{last?.content}</p>
+        )}
+
+        {/* Row 3: Status indicators */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 6, height: 6, borderRadius: 3, background: st.color, display: 'inline-block' }} />
             <span style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>{st.label}</span>
-            {c.conversationType === 'personal' && (
-              <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 4, background: 'rgba(139,92,246,0.15)', color: '#a78bfa', fontWeight: 600 }}>Pessoal</span>
-            )}
           </div>
           {c.unreadCount > 0 && (
             <span style={{

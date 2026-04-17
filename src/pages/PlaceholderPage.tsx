@@ -12,7 +12,7 @@ export default function PlaceholderPage({ title, description, icon }: { title: s
         <div style={{ width: 80, height: 80, borderRadius: 24, background: 'var(--glass)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px' }}>
           <Icon size={32} style={{ color: 'var(--fg-faint)' }} />
         </div>
-        <h2 style={{ fontSize: 20, fontWeight: 700, color: '#fff', marginBottom: 8 }}>{title}</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--strong-text)', marginBottom: 8 }}>{title}</h2>
         <p style={{ fontSize: 14, color: 'var(--fg-muted)', marginBottom: 24, lineHeight: 1.6 }}>{description}</p>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderRadius: 999, background: 'var(--glass)', border: '1px solid var(--border)' }}>
           <Lock size={12} style={{ color: 'var(--fg-subtle)' }} />

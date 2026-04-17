@@ -45,12 +45,12 @@ export function AccountSection({ data, onSave }: { data: AccountSettings; onSave
           width: 56, height: 56, borderRadius: '50%',
           background: 'linear-gradient(135deg, var(--accent), var(--accent-sec))',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 18, fontWeight: 800, color: '#fff', flexShrink: 0,
+          fontSize: 18, fontWeight: 800, color: 'var(--strong-text)', flexShrink: 0,
         }}>
           {initials}
         </div>
         <div>
-          <p style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>{form.fullName || 'Seu nome'}</p>
+          <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--strong-text)' }}>{form.fullName || 'Seu nome'}</p>
           <p style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>Administrador</p>
         </div>
       </div>
@@ -68,7 +68,7 @@ export function AccountSection({ data, onSave }: { data: AccountSettings; onSave
         padding: 20, borderRadius: 14, background: 'var(--glass)',
         border: '1px solid var(--border)', marginBottom: 24,
       }}>
-        <p style={{ fontSize: 13, fontWeight: 600, color: '#fff', marginBottom: 16 }}>Alterar senha</p>
+        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)', marginBottom: 16 }}>Alterar senha</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 16px' }}>
           <FieldGroup label="Senha atual">
             <TextInput value={passwords.current} onChange={(v) => setPasswords((p) => ({ ...p, current: v }))} type="password" placeholder="••••••" />

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { MessageSquare, Send, Phone, AlertTriangle, Loader, X, Reply, CheckCircle, Trash2, Bot, User, Power, Pencil } from 'lucide-react';
+import { MessageSquare, Send, Phone, AlertTriangle, Loader, X, Reply, CheckCircle, Trash2, Bot, User, Power, Pencil, Brain } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDashboardStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
@@ -37,6 +37,13 @@ export function ChatView() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [conv?.messages.length, selectedId]);
+  
+  // Trigger automatic analysis if missing
+  useEffect(() => {
+    if (conv && !conv.aiAnalysis && conv.messages.length >= 2) {
+      supabase.functions.invoke('evolution-client-analysis', { body: { conversationId: conv.id } });
+    }
+  }, [selectedId]);
 
   if (!conv) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
@@ -54,90 +61,122 @@ export function ChatView() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {/* Header */}
-      <div style={{ height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'rgba(12,12,14,0.8)', backdropFilter: 'blur(12px)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {conv.profilePicUrl ? (
-            <img src={conv.profilePicUrl} alt={conv.customerName} style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover' }} />
-          ) : (
-            <div style={{ width: 36, height: 36, borderRadius: '50%', background: pickGradient(conv.customerName), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#fff' }}>{conv.customerName[0]?.toUpperCase()}</div>
-          )}
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#fff' }}>{conv.customerName}</span>
-              <span style={{ fontSize: 10, fontWeight: 500, color: st.color }}>{st.label}</span>
+      <div style={{ minHeight: 64, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '12px 20px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--header-bg)', backdropFilter: 'blur(12px)', gap: 12 }}>
+        
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            {conv.profilePicUrl ? (
+              <img src={conv.profilePicUrl} alt={conv.customerName} style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover' }} />
+            ) : (
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: pickGradient(conv.customerName), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 700, color: '#fff', flexShrink: 0 }}>{conv.customerName[0]?.toUpperCase()}</div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--strong-text)', flexShrink: 0, letterSpacing: '-0.01em' }}>{conv.customerName}</span>
+                
+                {/* Type Status: P (Pessoal) or N (Negócio) */}
+                {conv.conversationType === 'personal' && (
+                  <span style={{ 
+                    fontSize: 9, padding: '1px 5px', borderRadius: 4, 
+                    background: 'rgba(139,92,246,0.15)', color: '#a78bfa', fontWeight: 900,
+                    flexShrink: 0
+                  }}>P</span>
+                )}
+                {conv.conversationType === 'business' && (
+                  <span style={{ 
+                    fontSize: 9, padding: '1px 5px', borderRadius: 4, 
+                    background: 'rgba(16,185,129,0.15)', color: 'var(--emerald-light)', fontWeight: 900,
+                    flexShrink: 0
+                  }}>N</span>
+                )}
+
+                <span style={{ fontSize: 10, fontWeight: 600, color: st.color, padding: '2px 8px', borderRadius: 6, background: 'var(--glass-strong)', flexShrink: 0 }}>{st.label}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-subtle)' }}>
+                <Phone size={12} /><span>{conv.customerPhone}</span>
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--fg-subtle)' }}>
-              <Phone size={10} /><span>{conv.customerPhone}</span>
-            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            {/* AI toggle for this conversation */}
+            <button
+              onClick={async () => {
+                if (togglingAI) return;
+                setTogglingAI(true);
+                const newVal = !conv.aiEnabled;
+                useDashboardStore.setState((state) => ({
+                  conversations: state.conversations.map((c) => c.id === conv.id ? { ...c, aiEnabled: newVal } : c),
+                }));
+                await supabase.from('conversations').update({ ai_enabled: newVal }).eq('id', conv.id);
+                setTogglingAI(false);
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
+                background: conv.aiEnabled ? 'rgba(16,185,129,0.1)' : 'var(--glass)',
+                border: `1px solid ${conv.aiEnabled ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`,
+                color: conv.aiEnabled ? 'var(--emerald-light)' : 'var(--fg-subtle)',
+                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              <Power size={12} />
+              {conv.aiEnabled ? 'IA Ativa' : 'IA Off'}
+            </button>
+
+            {/* Generate AI response */}
+            <button
+              onClick={async () => {
+                if (aiGenerating) return;
+                setAiGenerating(true);
+                try {
+                  const { data, error } = await supabase.functions.invoke('evolution-ai-reply', { body: { conversationId: conv.id, force: true } });
+                  if (error || data?.error) {
+                    alert(data?.error || 'Erro ao gerar resposta. Tente novamente.');
+                  } else if (data?.action === 'silenced') {
+                    alert('A IA não tem certeza da resposta para este contexto.');
+                  }
+                } catch {
+                  alert('Erro de conexão. Tente novamente.');
+                }
+                setAiGenerating(false);
+              }}
+              disabled={aiGenerating}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
+                background: 'var(--glass)', border: '1px solid var(--border)',
+                color: 'var(--fg-muted)', fontSize: 11, fontWeight: 500,
+                cursor: aiGenerating ? 'wait' : 'pointer', opacity: aiGenerating ? 0.5 : 1,
+              }}
+            >
+              {aiGenerating ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Bot size={12} />}
+              {aiGenerating ? 'Gerando...' : 'Gerar IA'}
+            </button>
+
+            {/* Client analysis shortcut */}
+            <button
+              onClick={() => navigate(`/clientes?id=${conv.id}`)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
+                background: 'var(--glass)', border: '1px solid var(--border)',
+                color: 'var(--fg-muted)', fontSize: 11, fontWeight: 500, cursor: 'pointer',
+              }}
+            >
+              <User size={12} /> Cliente
+            </button>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* AI toggle for this conversation */}
-          <button
-            onClick={async () => {
-              if (togglingAI) return;
-              setTogglingAI(true);
-              const newVal = !conv.aiEnabled;
-              useDashboardStore.setState((state) => ({
-                conversations: state.conversations.map((c) => c.id === conv.id ? { ...c, aiEnabled: newVal } : c),
-              }));
-              await supabase.from('conversations').update({ ai_enabled: newVal }).eq('id', conv.id);
-              setTogglingAI(false);
-            }}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
-              background: conv.aiEnabled ? 'rgba(16,185,129,0.1)' : 'var(--glass)',
-              border: `1px solid ${conv.aiEnabled ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`,
-              color: conv.aiEnabled ? 'var(--emerald-light)' : 'var(--fg-subtle)',
-              fontSize: 11, fontWeight: 600, cursor: 'pointer',
-            }}
-          >
-            <Power size={12} />
-            {conv.aiEnabled ? 'IA Ativa' : 'IA Off'}
-          </button>
-
-          {/* Generate AI response */}
-          <button
-            onClick={async () => {
-              if (aiGenerating) return;
-              setAiGenerating(true);
-              try {
-                const { data, error } = await supabase.functions.invoke('evolution-ai-reply', { body: { conversationId: conv.id, force: true } });
-                if (error || data?.error) {
-                  alert(data?.error || 'Erro ao gerar resposta. Tente novamente.');
-                } else if (data?.action === 'silenced') {
-                  alert('A IA não tem certeza da resposta para este contexto.');
-                }
-              } catch {
-                alert('Erro de conexão. Tente novamente.');
-              }
-              setAiGenerating(false);
-            }}
-            disabled={aiGenerating}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
-              background: 'var(--glass)', border: '1px solid var(--border)',
-              color: 'var(--fg-muted)', fontSize: 11, fontWeight: 500,
-              cursor: aiGenerating ? 'wait' : 'pointer', opacity: aiGenerating ? 0.5 : 1,
-            }}
-          >
-            {aiGenerating ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Bot size={12} />}
-            {aiGenerating ? 'Gerando...' : 'Gerar IA'}
-          </button>
-
-          {/* Client analysis shortcut */}
-          <button
-            onClick={() => navigate('/clientes')}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
-              background: 'var(--glass)', border: '1px solid var(--border)',
-              color: 'var(--fg-muted)', fontSize: 11, fontWeight: 500, cursor: 'pointer',
-            }}
-          >
-            <User size={12} /> Cliente
-          </button>
-        </div>
+        {/* Beautiful AI Summary Box */}
+        {conv.aiAnalysis?.resumo && (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', background: 'linear-gradient(to right, rgba(212, 175, 55, 0.08), rgba(212, 175, 55, 0.02))', borderLeft: '3px solid var(--accent)', borderRadius: '0 8px 8px 0' }}>
+            <Brain size={14} style={{ color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
+            <p style={{ fontSize: 12, color: 'var(--fg-dim)', lineHeight: 1.5, margin: 0 }}>
+              <strong style={{ fontWeight: 600, color: 'var(--accent)', marginRight: 6 }}>Contexto IA:</strong> 
+              {conv.aiAnalysis.resumo}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Silence Banner */}
@@ -160,6 +199,28 @@ export function ChatView() {
               onReply={(m) => { setReplyTo(m); inputRef.current?.focus(); }}
             />
           ))}
+          {(conv.status === 'ia_respondendo' && conv.aiEnabled && conv.messages[conv.messages.length - 1]?.author === 'cliente') && (
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent)', marginBottom: 4, paddingRight: 4 }}>
+                    IA Pensando
+                  </span>
+                  <div style={{
+                    padding: '12px 16px',
+                    borderRadius: '16px 16px 4px 16px',
+                    background: 'rgba(212, 175, 55, 0.08)',
+                    border: '1px solid rgba(212, 175, 55, 0.2)',
+                    display: 'flex', alignItems: 'center', gap: 4, height: 44
+                  }}>
+                    <div className="thinking-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
+                    <div className="thinking-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
+                    <div className="thinking-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
           <div ref={endRef} />
         </div>
       </div>
@@ -352,7 +413,7 @@ export function ChatView() {
               style={{
                 width: 40, height: 40, borderRadius: 12,
                 background: !msgText.trim() ? 'var(--surface-3)' : 'var(--accent)',
-                border: 'none', color: '#fff',
+                border: 'none', color: 'var(--strong-text)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 cursor: !msgText.trim() ? 'not-allowed' : 'pointer', flexShrink: 0,
               }}

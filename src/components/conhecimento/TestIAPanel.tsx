@@ -106,7 +106,7 @@ export function TestIAPanel() {
       <div style={{ padding: 20, borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <Sparkles size={16} style={{ color: 'var(--accent)' }} />
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>Teste a IA</h3>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--strong-text)' }}>Teste a IA</h3>
         </div>
         <p style={{ fontSize: 12, color: 'var(--fg-subtle)', lineHeight: 1.5 }}>Veja como a IA responderia com o conhecimento atual.</p>
       </div>

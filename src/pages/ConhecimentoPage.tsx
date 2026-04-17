@@ -25,7 +25,7 @@ export default function ConhecimentoPage() {
         ) : (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}>
             <div style={{ marginBottom: 32 }}>
-              <h1 style={{ fontSize: 24, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', color: '#fff', marginBottom: 8 }}>Base de Conhecimento</h1>
+              <h1 style={{ fontSize: 24, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', color: 'var(--strong-text)', marginBottom: 8 }}>Base de Conhecimento</h1>
               <p style={{ fontSize: 14, color: 'var(--fg-muted)' }}>O que a IA sabe responder. Adicione, edite ou remova informações.</p>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginBottom: 32 }}>

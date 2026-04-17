@@ -3,7 +3,7 @@ import { type ReactNode } from 'react';
 export function FieldGroup({ label, description, children }: { label: string; description?: string; children: ReactNode }) {
   return (
     <div style={{ marginBottom: 24 }}>
-      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#fff', marginBottom: 4 }}>{label}</label>
+      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--strong-text)', marginBottom: 4 }}>{label}</label>
       {description && <p style={{ fontSize: 12, color: 'var(--fg-subtle)', marginBottom: 8 }}>{description}</p>}
       {children}
     </div>
@@ -118,7 +118,7 @@ export function SaveButton({ onClick, saving }: { onClick: () => void; saving?: 
 export function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div style={{ marginBottom: 28 }}>
-      <h2 style={{ fontSize: 20, fontWeight: 800, color: '#fff', letterSpacing: '-0.02em' }}>{title}</h2>
+      <h2 style={{ fontSize: 20, fontWeight: 800, color: 'var(--strong-text)', letterSpacing: '-0.02em' }}>{title}</h2>
       {subtitle && <p style={{ fontSize: 13, color: 'var(--fg-muted)', marginTop: 4 }}>{subtitle}</p>}
     </div>
   );

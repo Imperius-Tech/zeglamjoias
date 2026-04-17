@@ -37,7 +37,7 @@ export function StoreSection({ data, onSave }: { data: StoreSettings; onSave: (d
           )}
         </div>
         <div style={{ flex: 1 }}>
-          <p style={{ fontSize: 14, fontWeight: 600, color: '#fff' }}>{form.name || 'Nome da Loja'}</p>
+          <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--strong-text)' }}>{form.name || 'Nome da Loja'}</p>
           <p style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{form.phone || 'Telefone não configurado'}</p>
         </div>
       </div>

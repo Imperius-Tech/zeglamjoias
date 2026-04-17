@@ -127,7 +127,7 @@ export default function ComprovantesPage() {
         {/* Header */}
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <h2 style={{ fontSize: 16, fontWeight: 800, color: '#fff' }}>Comprovantes</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 800, color: 'var(--strong-text)' }}>Comprovantes</h2>
             {counts.pendente > 0 && (
               <span style={{
                 padding: '2px 10px', borderRadius: 8, fontSize: 12, fontWeight: 700,
@@ -205,7 +205,7 @@ export default function ComprovantesPage() {
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                      <span className="truncate" style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>{proof.customer_name}</span>
+                      <span className="truncate" style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)' }}>{proof.customer_name}</span>
                       <span style={{ fontSize: 10, color: 'var(--fg-faint)', flexShrink: 0 }}>
                         {formatDistanceToNow(new Date(proof.created_at), { addSuffix: true, locale: ptBR })}
                       </span>
@@ -273,7 +273,7 @@ export default function ComprovantesPage() {
 
               {/* Client name */}
               <div>
-                <h2 style={{ fontSize: 16, fontWeight: 800, color: '#fff' }}>{selected.customer_name}</h2>
+                <h2 style={{ fontSize: 16, fontWeight: 800, color: 'var(--strong-text)' }}>{selected.customer_name}</h2>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
                   <Phone size={10} style={{ color: 'var(--fg-subtle)' }} />
                   <span style={{ fontSize: 12, color: 'var(--fg-muted)' }}>{selected.customer_phone}</span>

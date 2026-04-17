@@ -22,7 +22,7 @@ export function NotificationsSection({ data, onSave }: { data: NotificationSetti
         padding: 20, borderRadius: 14, background: 'var(--glass)',
         border: '1px solid var(--border)', marginBottom: 24,
       }}>
-        <p style={{ fontSize: 13, fontWeight: 600, color: '#fff', marginBottom: 8 }}>Alertas de conversa</p>
+        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)', marginBottom: 8 }}>Alertas de conversa</p>
         <Toggle
           checked={form.silencedConversation}
           onChange={(v) => update('silencedConversation', v)}
@@ -65,7 +65,7 @@ export function NotificationsSection({ data, onSave }: { data: NotificationSetti
         padding: 20, borderRadius: 14, background: 'var(--glass)',
         border: '1px solid var(--border)', marginBottom: 24,
       }}>
-        <p style={{ fontSize: 13, fontWeight: 600, color: '#fff', marginBottom: 8 }}>Geral</p>
+        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)', marginBottom: 8 }}>Geral</p>
         <Toggle
           checked={form.dailySummary}
           onChange={(v) => update('dailySummary', v)}

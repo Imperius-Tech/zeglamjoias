@@ -25,6 +25,7 @@ export interface Conversation {
   conversationType: ConversationType;
   aiEnabled: boolean;
   unreadCount: number;
+  aiAnalysis?: any;
   messages: Message[];
   lastMessageAt: Date;
 }

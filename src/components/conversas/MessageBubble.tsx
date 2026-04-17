@@ -111,7 +111,7 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
       style={{
         padding: '6px 10px', marginBottom: 6, borderRadius: 6,
         borderLeft: `3px solid ${quotedMessage.author === 'cliente' ? 'var(--fg-subtle)' : 'var(--emerald)'}`,
-        background: 'rgba(255,255,255,0.03)', cursor: 'pointer',
+        background: 'var(--glass)', cursor: 'pointer',
       }}
     >
       <p style={{ fontSize: 10, fontWeight: 600, color: quotedMessage.author === 'cliente' ? 'var(--fg-muted)' : 'var(--emerald-light)', marginBottom: 2 }}>
@@ -164,7 +164,7 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
             padding: '10px 16px',
             borderRadius: isClient ? '16px 16px 16px 4px' : '16px 16px 4px 16px',
             fontSize: 14, lineHeight: 1.6, color: 'var(--fg-dim)',
-            background: isClient ? 'rgba(255,255,255,0.05)' : isAI ? 'rgba(255,77,0,0.08)' : 'rgba(16,185,129,0.08)',
+            background: isClient ? 'var(--glass-strong)' : isAI ? 'rgba(255,77,0,0.08)' : 'rgba(16,185,129,0.08)',
             border: isClient ? 'none' : `1px ${isDraft ? 'dashed' : 'solid'} ${isAI ? 'var(--accent-border)' : 'rgba(16,185,129,0.2)'}`,
             opacity: isDraft ? 0.7 : 1,
           }}>
@@ -178,7 +178,7 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
                   <div style={{
                     display: 'inline-flex', alignItems: 'center', gap: 4,
                     marginTop: 6, padding: '3px 8px', borderRadius: 6,
-                    background: m.mediaAnalysis.is_payment_proof ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.04)',
+                    background: m.mediaAnalysis.is_payment_proof ? 'rgba(16,185,129,0.12)' : 'var(--glass)',
                     border: `1px solid ${m.mediaAnalysis.is_payment_proof ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`,
                   }}>
                     {m.mediaAnalysis.is_payment_proof ? <CreditCard size={10} style={{ color: 'var(--emerald)' }} /> : <Image size={10} style={{ color: 'var(--fg-subtle)' }} />}
@@ -198,7 +198,7 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
                   style={{
                     display: 'flex', alignItems: 'center', gap: 8,
                     padding: '8px 12px', borderRadius: 8,
-                    background: 'rgba(255,255,255,0.05)', textDecoration: 'none',
+                    background: 'var(--glass-strong)', textDecoration: 'none',
                   }}
                 >
                   <FileText size={18} style={{ color: 'var(--fg-subtle)', flexShrink: 0 }} />
@@ -217,6 +217,11 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
               </div>
             )}
             {!isMediaOnly && m.content && m.content}
+            {isMediaOnly && !m.mediaUrl && (
+              <span style={{ fontStyle: 'italic', color: 'var(--fg-muted)', fontSize: 13 }}>
+                {m.content === '[audio]' ? '🎵 Mensagem de áudio' : m.content === '[sticker]' ? '✨ Figurinha' : '📎 Arquivo de mídia'}
+              </span>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2, paddingLeft: 4 }}>
             <span style={{ fontSize: 10, color: 'var(--fg-faint)' }}>

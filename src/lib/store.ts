@@ -20,6 +20,7 @@ interface DashboardState {
   knowledgeEntries: KnowledgeEntry[];
   selectedCategory: CategoryKey | null;
   loading: boolean;
+  theme: 'dark' | 'light';
 
   loadConversations: () => Promise<void>;
   loadKnowledgeEntries: () => Promise<void>;
@@ -32,6 +33,7 @@ interface DashboardState {
   updateKnowledgeEntry: (id: string, updates: Partial<KnowledgeEntry>) => Promise<void>;
   deleteKnowledgeEntry: (id: string) => Promise<void>;
   subscribeRealtime: () => () => void;
+  toggleTheme: () => void;
 }
 
 export const useDashboardStore = create<DashboardState>((set, get) => ({
@@ -42,6 +44,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   knowledgeEntries: [],
   selectedCategory: null,
   loading: true,
+  theme: (localStorage.getItem('zeglam_theme') as 'dark' | 'light') || 'dark',
 
   loadConversations: async () => {
     if (DEMO_MODE) {
@@ -70,6 +73,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       conversationType: (c.conversation_type || 'unknown') as ConversationType,
       aiEnabled: c.ai_enabled ?? true,
       unreadCount: c.unread_count,
+      aiAnalysis: c.ai_analysis,
       lastMessageAt: new Date(c.last_message_at),
       messages: (msgs ?? [])
         .filter((m) => m.conversation_id === c.id)
@@ -271,6 +275,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
                   profilePicUrl: c.profile_pic_url ?? conv.profilePicUrl,
                   conversationType: (c.conversation_type as ConversationType) || conv.conversationType,
                   aiEnabled: c.ai_enabled ?? conv.aiEnabled,
+                  aiAnalysis: c.ai_analysis ?? conv.aiAnalysis,
                 }
               : conv
           ).sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime()),
@@ -287,6 +292,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
           conversationType: (c.conversation_type || 'unknown') as ConversationType,
           aiEnabled: c.ai_enabled ?? true,
           unreadCount: c.unread_count || 0,
+          aiAnalysis: c.ai_analysis || null,
           lastMessageAt: new Date(c.last_message_at),
           messages: [],
         };
@@ -302,4 +308,23 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       supabase.removeChannel(convChannel);
     };
   },
+
+  toggleTheme: () => {
+    set((state) => {
+      const newTheme = state.theme === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('zeglam_theme', newTheme);
+      if (newTheme === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+      }
+      return { theme: newTheme };
+    });
+  },
 }));
+
+// Apply initial theme
+const initialTheme = localStorage.getItem('zeglam_theme');
+if (initialTheme === 'light') {
+  document.documentElement.setAttribute('data-theme', 'light');
+}

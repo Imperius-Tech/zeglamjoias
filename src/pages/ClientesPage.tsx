@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Phone, MessageSquare, Clock, Users, Calendar, ArrowRight, Brain, RefreshCw, Loader, Target, TrendingUp, Tag, AlertCircle } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDashboardStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -31,7 +31,7 @@ function Avatar({ src, name, size = 40 }: { src?: string | null; name: string; s
       width: size, height: size, borderRadius: size / 2, flexShrink: 0,
       background: pickGradient(name),
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: size * 0.38, fontWeight: 700, color: '#fff',
+      fontSize: size * 0.38, fontWeight: 700, color: 'var(--strong-text)',
     }}>
       {name[0]?.toUpperCase()}
     </div>
@@ -130,7 +130,7 @@ function AIAnalysisPanel({ conversationId }: { conversationId: string }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Brain size={16} style={{ color: 'var(--accent)' }} />
-          <p style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Análise da IA</p>
+          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--strong-text)' }}>Análise da IA</p>
         </div>
         <button
           onClick={() => fetchAnalysis(true)}
@@ -155,7 +155,7 @@ function AIAnalysisPanel({ conversationId }: { conversationId: string }) {
             <Target size={12} style={{ color: 'var(--accent)' }} />
             <span style={{ fontSize: 10, color: 'var(--fg-subtle)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>Intenção</span>
           </div>
-          <p style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>{analysis.intencao || 'Indefinida'}</p>
+          <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)' }}>{analysis.intencao || 'Indefinida'}</p>
         </div>
 
         {/* Sentimento */}
@@ -186,7 +186,7 @@ function AIAnalysisPanel({ conversationId }: { conversationId: string }) {
             <TrendingUp size={12} style={{ color: 'var(--emerald)' }} />
             <span style={{ fontSize: 10, color: 'var(--fg-subtle)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>Potencial</span>
           </div>
-          <p style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>{analysis.valor_potencial || 'N/A'}</p>
+          <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)' }}>{analysis.valor_potencial || 'N/A'}</p>
         </div>
       </div>
 
@@ -194,7 +194,7 @@ function AIAnalysisPanel({ conversationId }: { conversationId: string }) {
       {analysis.status_atendimento && (
         <div style={{ padding: 14, borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)' }}>
           <span style={{ fontSize: 10, color: 'var(--fg-subtle)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>Status do atendimento</span>
-          <p style={{ fontSize: 13, fontWeight: 600, color: '#fff', marginTop: 4 }}>{analysis.status_atendimento.replace(/_/g, ' ')}</p>
+          <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)', marginTop: 4 }}>{analysis.status_atendimento.replace(/_/g, ' ')}</p>
         </div>
       )}
 
@@ -257,7 +257,7 @@ function ClientDetail({ conv, onOpenChat }: { conv: Conversation; onOpenChat: ()
         <Avatar src={conv.profilePicUrl} name={conv.customerName} size={72} />
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <h2 style={{ fontSize: 20, fontWeight: 800, color: '#fff', letterSpacing: '-0.02em' }}>
+            <h2 style={{ fontSize: 20, fontWeight: 800, color: 'var(--strong-text)', letterSpacing: '-0.02em' }}>
               {conv.customerName}
             </h2>
             {conv.conversationType === 'personal' && (
@@ -296,15 +296,15 @@ function ClientDetail({ conv, onOpenChat }: { conv: Conversation; onOpenChat: ()
       {/* Stats grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 24 }}>
         <div style={{ padding: 14, borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)', textAlign: 'center' }}>
-          <p style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>{totalMessages}</p>
+          <p style={{ fontSize: 20, fontWeight: 800, color: 'var(--strong-text)' }}>{totalMessages}</p>
           <p style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>Mensagens</p>
         </div>
         <div style={{ padding: 14, borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)', textAlign: 'center' }}>
-          <p style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>{clientMessages}</p>
+          <p style={{ fontSize: 20, fontWeight: 800, color: 'var(--strong-text)' }}>{clientMessages}</p>
           <p style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>Recebidas</p>
         </div>
         <div style={{ padding: 14, borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)', textAlign: 'center' }}>
-          <p style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>{sentMessages}</p>
+          <p style={{ fontSize: 20, fontWeight: 800, color: 'var(--strong-text)' }}>{sentMessages}</p>
           <p style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>Enviadas</p>
         </div>
       </div>
@@ -355,8 +355,17 @@ export default function ClientesPage() {
   const conversations = useDashboardStore((s) => s.conversations);
   const selectConversation = useDashboardStore((s) => s.selectConversation);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Auto-select client if ID is in URL
+  useEffect(() => {
+    const id = searchParams.get('id');
+    if (id && conversations.some(c => c.id === id)) {
+      setSelectedId(id);
+    }
+  }, [searchParams, conversations]);
 
   const clients = useMemo(() => {
     let list = [...conversations].sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
@@ -378,7 +387,7 @@ export default function ClientesPage() {
       }}>
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <h2 style={{ fontSize: 16, fontWeight: 800, color: '#fff' }}>Clientes</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 800, color: 'var(--strong-text)' }}>Clientes</h2>
             <span style={{ fontSize: 12, color: 'var(--fg-subtle)', background: 'var(--glass)', padding: '2px 10px', borderRadius: 8 }}>{clients.length}</span>
           </div>
           <div style={{ position: 'relative' }}>
@@ -407,7 +416,7 @@ export default function ClientesPage() {
                 <Avatar src={c.profilePicUrl} name={c.customerName} size={36} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                    <span className="truncate" style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>{c.customerName}</span>
+                    <span className="truncate" style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)' }}>{c.customerName}</span>
                     <span style={{ fontSize: 10, color: 'var(--fg-faint)', flexShrink: 0 }}>
                       {formatDistanceToNow(c.lastMessageAt, { addSuffix: false, locale: ptBR })}
                     </span>
@@ -416,6 +425,7 @@ export default function ClientesPage() {
                     <span className="truncate" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{c.customerPhone}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                       {c.conversationType === 'personal' && <span style={{ fontSize: 8, padding: '1px 5px', borderRadius: 3, background: 'rgba(139,92,246,0.15)', color: '#a78bfa', fontWeight: 600 }}>P</span>}
+                      {c.conversationType === 'business' && <span style={{ fontSize: 8, padding: '1px 5px', borderRadius: 4, background: 'rgba(16,185,129,0.15)', color: 'var(--emerald-light)', fontWeight: 900 }}>N</span>}
                       <MessageSquare size={9} style={{ color: 'var(--fg-faint)' }} />
                       <span style={{ fontSize: 9, color: 'var(--fg-faint)' }}>{c.messages.length}</span>
                     </div>

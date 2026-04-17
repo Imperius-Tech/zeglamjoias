@@ -76,7 +76,7 @@ export default function ConfiguracoesPage() {
                 display: 'flex', alignItems: 'center', gap: 10,
                 width: '100%', padding: '10px 12px', borderRadius: 10,
                 marginBottom: 2, fontSize: 13, fontWeight: 500,
-                color: active ? '#fff' : 'var(--fg-muted)',
+                color: active ? 'var(--strong-text)' : 'var(--fg-muted)',
                 background: active ? 'var(--glass-strong)' : 'transparent',
                 border: 'none', cursor: 'pointer',
                 transition: 'all 0.15s ease',

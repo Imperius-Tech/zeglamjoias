@@ -29,7 +29,7 @@ export function CategoryCard({ categoryKey, entries, index, onClick }: { categor
       <div style={{ width: 48, height: 48, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, background: `${info.color}15`, border: `1px solid ${info.color}25` }}>
         <Icon size={22} style={{ color: info.color }} />
       </div>
-      <h3 style={{ fontSize: 16, fontWeight: 600, color: '#fff', marginBottom: 4 }}>{info.name}</h3>
+      <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--strong-text)', marginBottom: 4 }}>{info.name}</h3>
       <p style={{ fontSize: 12, color: 'var(--fg-subtle)', marginBottom: 16 }}>{entries.length} informações cadastradas</p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
         {entries.slice(0, 2).map((e) => <p key={e.id} className="truncate" style={{ fontSize: 12, color: 'var(--fg-muted)' }}>&bull; {e.question}</p>)}

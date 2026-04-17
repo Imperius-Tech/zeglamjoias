@@ -20,12 +20,12 @@ export function KnowledgeEditor({ categoryKey, onBack }: { categoryKey: Category
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
           <span style={{ color: 'var(--fg-subtle)' }}>Base de Conhecimento</span>
           <span style={{ color: 'var(--fg-faint)' }}>›</span>
-          <span style={{ color: '#fff', fontWeight: 500 }}>{info.name}</span>
+          <span style={{ color: 'var(--strong-text)', fontWeight: 500 }}>{info.name}</span>
         </div>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>{entries.length} entradas</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--strong-text)' }}>{entries.length} entradas</h2>
         <button style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderRadius: 12, background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 500, border: 'none', cursor: 'pointer' }}><Plus size={16} />Adicionar entrada</button>
       </div>
 
@@ -38,7 +38,7 @@ export function KnowledgeEditor({ categoryKey, onBack }: { categoryKey: Category
               <button onClick={() => setExpandedId(isExp ? null : entry.id)}
                 style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 16, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <h4 className="truncate" style={{ fontSize: 14, fontWeight: 500, color: '#fff' }}>{entry.question}</h4>
+                  <h4 className="truncate" style={{ fontSize: 14, fontWeight: 500, color: 'var(--strong-text)' }}>{entry.question}</h4>
                   {!isExp && <p className="truncate" style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2 }}>{entry.answer}</p>}
                 </div>
                 {isExp ? <ChevronUp size={16} style={{ color: 'var(--fg-subtle)', marginLeft: 8, flexShrink: 0 }} /> : <ChevronDown size={16} style={{ color: 'var(--fg-subtle)', marginLeft: 8, flexShrink: 0 }} />}

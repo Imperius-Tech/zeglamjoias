@@ -232,7 +232,7 @@ export function IntegrationSection() {
           }} />
         </div>
         <div style={{ flex: 1 }}>
-          <p style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>Status da Conexão</p>
+          <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)' }}>Status da Conexão</p>
           <p style={{ fontSize: 12, color: st.color }}>{st.label}</p>
         </div>
         <div style={{
@@ -264,7 +264,7 @@ export function IntegrationSection() {
               )}
               <p style={{
                 fontSize: 14, fontWeight: 600,
-                color: isDone ? 'var(--emerald)' : isError ? 'var(--red)' : '#fff',
+                color: isDone ? 'var(--emerald)' : isError ? 'var(--red)' : 'var(--strong-text)',
               }}>
                 {isDone ? 'Sincronização concluída!' : isError ? 'Erro na sincronização' : 'Sincronizando mensagens e mídias...'}
               </p>
@@ -295,15 +295,15 @@ export function IntegrationSection() {
 
             <div style={{ display: 'flex', gap: 24 }}>
               <div>
-                <p style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>{job.total_chats}</p>
+                <p style={{ fontSize: 20, fontWeight: 800, color: 'var(--strong-text)' }}>{job.total_chats}</p>
                 <p style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>Conversas</p>
               </div>
               <div>
-                <p style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>{job.total_messages}</p>
+                <p style={{ fontSize: 20, fontWeight: 800, color: 'var(--strong-text)' }}>{job.total_messages}</p>
                 <p style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>Mensagens</p>
               </div>
               <div>
-                <p style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>{job.total_media}</p>
+                <p style={{ fontSize: 20, fontWeight: 800, color: 'var(--strong-text)' }}>{job.total_media}</p>
                 <p style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>Mídias</p>
               </div>
             </div>
@@ -362,7 +362,7 @@ export function IntegrationSection() {
           ) : status === 'connected' ? (
             <div>
               <Wifi size={48} style={{ color: 'var(--emerald)', margin: '0 auto 12px' }} />
-              <p style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>WhatsApp conectado!</p>
+              <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--strong-text)' }}>WhatsApp conectado!</p>
               <p style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
                 Suas mensagens estão sendo recebidas em tempo real
               </p>

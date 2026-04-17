@@ -36,7 +36,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <img src="/zeglam.png" alt="Zeglam" style={{ width: 32, height: 32, borderRadius: 8 }} />
-              <span style={{ fontSize: 18, fontWeight: 900, letterSpacing: '-0.04em', color: '#fff' }}>ZEGLAM</span>
+              <span style={{ fontSize: 18, fontWeight: 900, letterSpacing: '-0.04em', color: 'var(--strong-text)' }}>ZEGLAM</span>
               <span style={{ position: 'relative', width: 8, height: 8, display: 'inline-flex' }}>
                 <span className="anim-ping" style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--accent)', opacity: 0.75 }} />
                 <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }} />
@@ -64,7 +64,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 style={{
                   display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 12,
                   textDecoration: 'none', fontSize: 14, fontWeight: 500, transition: 'all 0.2s',
-                  color: active ? '#fff' : 'var(--fg-muted)',
+                  color: active ? 'var(--strong-text)' : 'var(--fg-muted)',
                   background: active ? 'var(--glass-strong)' : 'transparent',
                   borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent',
                 }}
@@ -100,10 +100,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               width: 36, height: 36, borderRadius: '50%',
               background: 'linear-gradient(135deg, var(--accent), var(--accent-sec))',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, fontWeight: 700, color: '#fff',
+              fontSize: 14, fontWeight: 700, color: 'var(--strong-text)',
             }}>Z</div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <p className="truncate" style={{ fontSize: 14, fontWeight: 600, color: '#fff' }}>Zevaldo Gama</p>
+              <p className="truncate" style={{ fontSize: 14, fontWeight: 600, color: 'var(--strong-text)' }}>Zevaldo Gama</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--emerald)' }} />
                 <span style={{ fontSize: 11, color: 'var(--emerald-light)' }}>Online</span>

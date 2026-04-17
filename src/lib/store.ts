@@ -10,7 +10,7 @@ import type {
 } from './mock-data';
 import { conversations as mockConversations, knowledgeEntries as mockKnowledge } from './mock-data';
 
-const DEMO_MODE = true;
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
 interface DashboardState {
   conversations: Conversation[];

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Wifi, WifiOff, Loader, QrCode, CheckCircle, MessageSquare, ArrowRight, RefreshCw } from 'lucide-react';
+import { Wifi, WifiOff, Loader, QrCode, CheckCircle, MessageSquare, ArrowRight, RefreshCw, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SectionTitle } from './SettingsField';
@@ -196,6 +196,28 @@ export function IntegrationSection() {
     }
   };
 
+  const handleLogout = async () => {
+    const confirmed = window.confirm(
+      'Tem certeza que deseja desconectar o WhatsApp?\n\nVocê precisará escanear o QR Code novamente para reconectar.'
+    );
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      await supabase.functions.invoke('evolution-qrcode', {
+        body: { action: 'logout', instanceName: 'Teste Zeglam' },
+      });
+      setStatus('disconnected');
+      setQrBase64(null);
+      setJob(null);
+    } catch (err: any) {
+      setError(err.message || 'Erro ao desconectar WhatsApp.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (checking) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200 }}>
@@ -366,17 +388,34 @@ export function IntegrationSection() {
               <p style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
                 Suas mensagens estão sendo recebidas em tempo real
               </p>
-              <button
-                onClick={handleStartSync}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 8,
-                  marginTop: 16, padding: '10px 20px', borderRadius: 10,
-                  background: 'var(--surface-3)', border: '1px solid var(--border)',
-                  color: 'var(--fg-dim)', fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                }}
-              >
-                <RefreshCw size={14} /> Sincronizar conversas
-              </button>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginTop: 16 }}>
+                <button
+                  onClick={handleStartSync}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '10px 20px', borderRadius: 10,
+                    background: 'var(--surface-3)', border: '1px solid var(--border)',
+                    color: 'var(--fg-dim)', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                  }}
+                >
+                  <RefreshCw size={14} /> Sincronizar conversas
+                </button>
+                <button
+                  onClick={handleLogout}
+                  disabled={loading}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '10px 20px', borderRadius: 10,
+                    background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)',
+                    color: 'var(--red, #ef4444)', fontSize: 13, fontWeight: 500,
+                    cursor: loading ? 'wait' : 'pointer',
+                    opacity: loading ? 0.6 : 1,
+                  }}
+                >
+                  {loading ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <LogOut size={14} />}
+                  Desconectar WhatsApp
+                </button>
+              </div>
             </div>
           ) : (
             <div>

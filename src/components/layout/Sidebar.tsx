@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { MessageSquare, BookOpen, FileCheck, BarChart3, Settings, X, Users } from 'lucide-react';
+import { MessageSquare, BookOpen, FileCheck, BarChart3, Settings, X, Users, Zap } from 'lucide-react';
 import { useDashboardStore } from '@/lib/store';
 
 const navItems = [
@@ -7,7 +7,8 @@ const navItems = [
   { href: '/clientes', label: 'Clientes', icon: Users },
   { href: '/conhecimento', label: 'Base de Conhecimento', icon: BookOpen },
   { href: '/comprovantes', label: 'Comprovantes', icon: FileCheck },
-  { href: '/metricas', label: 'Métricas', icon: BarChart3, soon: true },
+  { href: '/automacoes', label: 'Automações', icon: Zap },
+  { href: '/metricas', label: 'Métricas', icon: BarChart3 },
   { href: '/configuracoes', label: 'Configurações', icon: Settings },
 ];
 
@@ -78,11 +79,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                     background: 'var(--accent)', fontSize: 10, fontWeight: 700, color: '#fff',
                   }}>
                     {unreadTotal}
-                  </span>
-                )}
-                {item.soon && (
-                  <span style={{ fontSize: 9, fontWeight: 500, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Em breve
                   </span>
                 )}
               </Link>

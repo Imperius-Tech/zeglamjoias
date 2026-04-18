@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { MessageSquare, Send, Phone, AlertTriangle, Loader, X, Reply, CheckCircle, Trash2, Bot, User, Power, Pencil, Brain } from 'lucide-react';
+import { MessageSquare, Send, Phone, AlertTriangle, Loader, X, Reply, CheckCircle, Trash2, Bot, User, Power, Pencil, Brain, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDashboardStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { MessageBubble } from './MessageBubble';
+import { GroupCandidateCard } from './GroupCandidateCard';
 import type { ConversationStatus, Message } from '@/lib/mock-data';
 
 const statusLabels: Record<ConversationStatus, { label: string; color: string }> = {
@@ -32,18 +33,45 @@ export function ChatView() {
   const [msgText, setMsgText] = useState('');
   const [aiGenerating, setAiGenerating] = useState(false);
   const [togglingAI, setTogglingAI] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editingDraft, setEditingDraft] = useState<Message | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [conv?.messages.length, selectedId]);
-  
+
   // Trigger automatic analysis if missing
   useEffect(() => {
     if (conv && !conv.aiAnalysis && conv.messages.length >= 2) {
       supabase.functions.invoke('evolution-client-analysis', { body: { conversationId: conv.id } });
     }
   }, [selectedId]);
+
+  // Auto-geração de sugestões quando o atendente abre um lead não respondido.
+  // Dispara apenas uma vez por mensagem do cliente (cache por ID da última msg).
+  // Critérios: unread > 0, última msg do cliente sem resposta, não é grupo,
+  // não está em fluxo de entrada no grupo, não tem sugestões ativas.
+  useEffect(() => {
+    if (!conv) return;
+    if (conv.isGroup) return;
+    if (conv.unreadCount <= 0) return;
+    if (conv.groupCandidateStatus === 'aguardando_dados') return;
+
+    const realMessages = conv.messages.filter((m) => !m.isDraft);
+    const last = realMessages[realMessages.length - 1];
+    if (!last || last.author !== 'cliente') return;
+
+    const hasActiveSuggestions = conv.messages.some((m) => m.isDraft && m.suggestionGroupId);
+    if (hasActiveSuggestions) return;
+
+    const cacheKey = `auto-suggest-${last.id}`;
+    if (sessionStorage.getItem(cacheKey)) return;
+    sessionStorage.setItem(cacheKey, '1');
+
+    supabase.functions.invoke('evolution-ai-reply', {
+      body: { conversationId: conv.id, mode: 'suggestions' },
+    }).catch((err) => console.error('[auto-suggest] failed:', err));
+  }, [selectedId, conv?.messages.length]);
 
   if (!conv) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
@@ -100,57 +128,112 @@ export function ChatView() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            {/* AI toggle for this conversation */}
-            <button
-              onClick={async () => {
-                if (togglingAI) return;
-                setTogglingAI(true);
-                const newVal = !conv.aiEnabled;
-                useDashboardStore.setState((state) => ({
-                  conversations: state.conversations.map((c) => c.id === conv.id ? { ...c, aiEnabled: newVal } : c),
-                }));
-                await supabase.from('conversations').update({ ai_enabled: newVal }).eq('id', conv.id);
-                setTogglingAI(false);
-              }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
-                background: conv.aiEnabled ? 'rgba(16,185,129,0.1)' : 'var(--glass)',
-                border: `1px solid ${conv.aiEnabled ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`,
-                color: conv.aiEnabled ? 'var(--emerald-light)' : 'var(--fg-subtle)',
-                fontSize: 11, fontWeight: 600, cursor: 'pointer',
-              }}
-            >
-              <Power size={12} />
-              {conv.aiEnabled ? 'IA Ativa' : 'IA Off'}
-            </button>
+            {/* Grupo: IA bloqueada por design — nunca responder em grupos */}
+            {conv.isGroup ? (
+              <div
+                title="A IA não responde em grupos por política de segurança"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
+                  background: 'rgba(148,163,184,0.08)',
+                  border: '1px dashed var(--border)',
+                  color: 'var(--fg-subtle)', fontSize: 11, fontWeight: 600,
+                  cursor: 'not-allowed', opacity: 0.7,
+                }}
+              >
+                <Power size={12} />
+                IA bloqueada em grupos
+              </div>
+            ) : (
+              <>
+                {/* AI toggle for this conversation */}
+                <button
+                  onClick={async () => {
+                    if (togglingAI) return;
+                    if (conv.isGroup) { alert('A IA não pode ser ativada em grupos por política de segurança.'); return; }
+                    setTogglingAI(true);
+                    const newVal = !conv.aiEnabled;
+                    useDashboardStore.setState((state) => ({
+                      conversations: state.conversations.map((c) => c.id === conv.id ? { ...c, aiEnabled: newVal } : c),
+                    }));
+                    await supabase.from('conversations').update({ ai_enabled: newVal }).eq('id', conv.id);
+                    setTogglingAI(false);
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
+                    background: conv.aiEnabled ? 'rgba(16,185,129,0.1)' : 'var(--glass)',
+                    border: `1px solid ${conv.aiEnabled ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`,
+                    color: conv.aiEnabled ? 'var(--emerald-light)' : 'var(--fg-subtle)',
+                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  <Power size={12} />
+                  {conv.aiEnabled ? 'IA Ativa' : 'IA Off'}
+                </button>
 
-            {/* Generate AI response */}
+                {/* Generate AI response */}
+                <button
+                  onClick={async () => {
+                    if (aiGenerating) return;
+                    if (conv.isGroup) { alert('A IA não pode gerar respostas para grupos.'); return; }
+                    setAiGenerating(true);
+                    try {
+                      const { data, error } = await supabase.functions.invoke('evolution-ai-reply', { body: { conversationId: conv.id, force: true, mode: 'suggestions' } });
+                      if (error || data?.error) {
+                        alert(data?.error || 'Erro ao gerar resposta. Tente novamente.');
+                      } else if (data?.action === 'silenced') {
+                        alert('A IA não tem certeza da resposta para este contexto.');
+                      } else if (data?.reason === 'group_blocked' || data?.reason === 'group_blocked_send') {
+                        alert('A IA não responde em grupos por política de segurança.');
+                      }
+                    } catch {
+                      alert('Erro de conexão. Tente novamente.');
+                    }
+                    setAiGenerating(false);
+                  }}
+                  disabled={aiGenerating}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
+                    background: 'var(--glass)', border: '1px solid var(--border)',
+                    color: 'var(--fg-muted)', fontSize: 11, fontWeight: 500,
+                    cursor: aiGenerating ? 'wait' : 'pointer', opacity: aiGenerating ? 0.5 : 1,
+                  }}
+                >
+                  {aiGenerating ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Bot size={12} />}
+                  {aiGenerating ? 'Gerando...' : 'Gerar IA'}
+                </button>
+              </>
+            )}
+
+            {/* Analyze client (force refresh) */}
             <button
               onClick={async () => {
-                if (aiGenerating) return;
-                setAiGenerating(true);
+                if (analyzing) return;
+                setAnalyzing(true);
                 try {
-                  const { data, error } = await supabase.functions.invoke('evolution-ai-reply', { body: { conversationId: conv.id, force: true } });
+                  const { data, error } = await supabase.functions.invoke('evolution-client-analysis', {
+                    body: { conversationId: conv.id, forceRefresh: true },
+                  });
                   if (error || data?.error) {
-                    alert(data?.error || 'Erro ao gerar resposta. Tente novamente.');
-                  } else if (data?.action === 'silenced') {
-                    alert('A IA não tem certeza da resposta para este contexto.');
+                    alert(data?.error || 'Erro ao analisar cliente. Tente novamente.');
                   }
                 } catch {
                   alert('Erro de conexão. Tente novamente.');
                 }
-                setAiGenerating(false);
+                setAnalyzing(false);
               }}
-              disabled={aiGenerating}
+              disabled={analyzing}
+              title="Forçar nova análise do cliente (resumo, interesses, estágio)"
               style={{
                 display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
-                background: 'var(--glass)', border: '1px solid var(--border)',
-                color: 'var(--fg-muted)', fontSize: 11, fontWeight: 500,
-                cursor: aiGenerating ? 'wait' : 'pointer', opacity: aiGenerating ? 0.5 : 1,
+                background: analyzing ? 'rgba(212,175,55,0.1)' : 'var(--glass)',
+                border: `1px solid ${analyzing ? 'var(--accent-border)' : 'var(--border)'}`,
+                color: analyzing ? 'var(--accent)' : 'var(--fg-muted)',
+                fontSize: 11, fontWeight: 500,
+                cursor: analyzing ? 'wait' : 'pointer', opacity: analyzing ? 0.7 : 1,
               }}
             >
-              {aiGenerating ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Bot size={12} />}
-              {aiGenerating ? 'Gerando...' : 'Gerar IA'}
+              {analyzing ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Sparkles size={12} />}
+              {analyzing ? 'Analisando...' : 'Analisar'}
             </button>
 
             {/* Client analysis shortcut */}
@@ -179,6 +262,9 @@ export function ChatView() {
         )}
       </div>
 
+      {/* Group Candidate Card */}
+      <GroupCandidateCard conv={conv} />
+
       {/* Silence Banner */}
       {conv.status === 'silenciada' && (
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
@@ -191,55 +277,94 @@ export function ChatView() {
       {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {conv.messages.map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              message={msg}
-              quotedMessage={msg.quotedMessageId ? conv.messages.find((m) => m.id === msg.quotedMessageId) : null}
-              onReply={(m) => { setReplyTo(m); inputRef.current?.focus(); }}
-            />
-          ))}
-          {(conv.status === 'ia_respondendo' && conv.aiEnabled && conv.messages[conv.messages.length - 1]?.author === 'cliente') && (
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 8 }}>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent)', marginBottom: 4, paddingRight: 4 }}>
-                    IA Pensando
-                  </span>
-                  <div style={{
-                    padding: '12px 16px',
-                    borderRadius: '16px 16px 4px 16px',
-                    background: 'rgba(212, 175, 55, 0.08)',
-                    border: '1px solid rgba(212, 175, 55, 0.2)',
-                    display: 'flex', alignItems: 'center', gap: 4, height: 44
-                  }}>
-                    <div className="thinking-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
-                    <div className="thinking-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
-                    <div className="thinking-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
+          {conv.messages
+            .filter((msg) => !msg.suggestionGroupId) // Sugestões aparecem no painel separado
+            .map((msg) => (
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                quotedMessage={msg.quotedMessageId ? conv.messages.find((m) => m.id === msg.quotedMessageId) : null}
+                onReply={(m) => { setReplyTo(m); inputRef.current?.focus(); }}
+              />
+            ))}
+          {(() => {
+            // "IA Pensando" só aparece quando:
+            // 1. IA está ativa na conversa
+            // 2. Última mensagem real (não-draft) é do cliente
+            // 3. Status é ia_respondendo
+            // 4. Ainda NÃO tem sugestões disponíveis (senão o painel de sugestões aparece)
+            // 5. Ainda NÃO tem resposta da IA depois da última mensagem do cliente
+            if (!conv.aiEnabled) return null;
+            if (conv.status !== 'ia_respondendo') return null;
+
+            const realMessages = conv.messages.filter((m) => !m.isDraft);
+            const last = realMessages[realMessages.length - 1];
+            if (!last || last.author !== 'cliente') return null;
+
+            const hasSuggestions = conv.messages.some((m) => m.isDraft && m.suggestionGroupId);
+            if (hasSuggestions) return null;
+
+            // Se última mensagem foi há mais de 2 minutos, não está mais "pensando"
+            const lastTs = last.timestamp instanceof Date ? last.timestamp : new Date(last.timestamp);
+            const ageMs = Date.now() - lastTs.getTime();
+            if (ageMs > 2 * 60 * 1000) return null;
+
+            return (
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent)', marginBottom: 4, paddingRight: 4 }}>
+                      IA Pensando
+                    </span>
+                    <div style={{
+                      padding: '12px 16px',
+                      borderRadius: '16px 16px 4px 16px',
+                      background: 'rgba(212, 175, 55, 0.08)',
+                      border: '1px solid rgba(212, 175, 55, 0.2)',
+                      display: 'flex', alignItems: 'center', gap: 4, height: 44
+                    }}>
+                      <div className="thinking-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
+                      <div className="thinking-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
+                      <div className="thinking-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
+                    </div>
                   </div>
                 </div>
-              </div>
-            </motion.div>
-          )}
+              </motion.div>
+            );
+          })()}
           <div ref={endRef} />
         </div>
       </div>
 
-      {/* Draft approval bar */}
+      {/* AI Suggestions Panel — 2 respostas sugeridas */}
       {(() => {
-        const lastDraft = conv.messages.filter((m) => m.isDraft).pop();
-        if (!lastDraft) return null;
+        // Agrupa drafts de sugestão pela mesma group_id
+        const suggestions = conv.messages.filter((m) => m.isDraft && m.suggestionGroupId);
+        // Também suporta drafts legacy (sem suggestion_group_id) pra compatibilidade
+        const legacyDraft = conv.messages.find((m) => m.isDraft && !m.suggestionGroupId);
 
-        const removeDraft = (draftId: string) => {
+        if (suggestions.length === 0 && !legacyDraft) return null;
+
+        // Ordena sugestões: direct primeiro, warm depois
+        const ordered = [...suggestions].sort((a, b) => {
+          if (a.suggestionStyle === 'direct') return -1;
+          if (b.suggestionStyle === 'direct') return 1;
+          return 0;
+        });
+
+        const items = ordered.length > 0
+          ? ordered
+          : legacyDraft ? [legacyDraft] : [];
+
+        const removeFromStore = (ids: string[]) => {
           useDashboardStore.setState((state) => ({
             conversations: state.conversations.map((c) =>
-              c.id === conv.id ? { ...c, messages: c.messages.filter((m) => m.id !== draftId) } : c
+              c.id === conv.id ? { ...c, messages: c.messages.filter((m) => !ids.includes(m.id)) } : c
             ),
           }));
         };
 
         const saveTrainingExample = async (aiOriginal: string, corrected: string) => {
-          // Get last 5 messages as context (excluding the draft)
           const context = conv.messages
             .filter((m) => !m.isDraft)
             .slice(-5)
@@ -253,85 +378,200 @@ export function ChatView() {
           });
         };
 
-        return (
-          <div style={{ borderTop: '1px solid var(--accent-border)', background: 'rgba(255,77,0,0.04)' }}>
-            {/* Edit mode */}
-            {editingDraft && editingDraft.id === lastDraft.id && (
-              <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                  <Pencil size={12} style={{ color: 'var(--accent)' }} />
-                  <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>Editando resposta da IA</span>
-                  <button onClick={() => setEditingDraft(null)} style={{ marginLeft: 'auto', padding: 2, background: 'none', border: 'none', color: 'var(--fg-subtle)', cursor: 'pointer' }}><X size={12} /></button>
-                </div>
-                <textarea
-                  value={msgText}
-                  onChange={(e) => setMsgText(e.target.value)}
-                  rows={3}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 13, color: 'var(--fg-dim)', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
-                />
-                <div style={{ display: 'flex', gap: 8, marginTop: 8, justifyContent: 'flex-end' }}>
-                  <button
-                    onClick={async () => {
-                      const corrected = msgText.trim();
-                      if (!corrected) return;
-                      const originalAI = editingDraft.content;
-                      const draftId = editingDraft.id;
-                      setEditingDraft(null);
-                      setMsgText('');
-                      removeDraft(draftId);
-                      // Send corrected version
-                      supabase.functions.invoke('evolution-send', { body: { conversationId: conv.id, text: corrected } });
-                      await supabase.from('messages').delete().eq('id', draftId);
-                      // Save training example if text was changed
-                      if (corrected !== originalAI) {
-                        await saveTrainingExample(originalAI, corrected);
-                      }
-                    }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, background: 'var(--emerald)', color: '#fff', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer' }}
-                  >
-                    <Send size={12} /> Enviar editado
-                  </button>
+        const approveAndSend = async (chosen: Message) => {
+          const allIds = items.map((s) => s.id);
+          // Otimistic UI: remove drafts e marca status como aguardando
+          useDashboardStore.setState((state) => ({
+            conversations: state.conversations.map((c) =>
+              c.id === conv.id ? { ...c, messages: c.messages.filter((m) => !allIds.includes(m.id)), status: 'aguardando_humano' } : c
+            ),
+          }));
+          supabase.functions.invoke('evolution-send', { body: { conversationId: conv.id, text: chosen.content } });
+          await supabase.from('messages').delete().in('id', allIds);
+          await supabase.from('conversations').update({ status: 'aguardando_humano' }).eq('id', conv.id);
+        };
+
+        const discardAll = async () => {
+          const allIds = items.map((s) => s.id);
+          // Otimistic UI: remove drafts e sai do estado "ia_respondendo"
+          useDashboardStore.setState((state) => ({
+            conversations: state.conversations.map((c) =>
+              c.id === conv.id ? { ...c, messages: c.messages.filter((m) => !allIds.includes(m.id)), status: 'aguardando_humano' } : c
+            ),
+          }));
+          await supabase.from('messages').delete().in('id', allIds);
+          await supabase.from('conversations').update({ status: 'aguardando_humano' }).eq('id', conv.id);
+        };
+
+        const confidenceColor = (c: number | null | undefined) => {
+          if (!c) return 'var(--fg-subtle)';
+          if (c >= 80) return 'var(--emerald-light)';
+          if (c >= 60) return '#fbbf24';
+          if (c >= 40) return '#fb923c';
+          return '#f87171';
+        };
+
+        const styleLabel = (s: Message['suggestionStyle']) => {
+          if (s === 'direct') return { label: 'Direto', icon: '⚡', color: '#60a5fa' };
+          if (s === 'warm') return { label: 'Acolhedor', icon: '💛', color: '#fbbf24' };
+          return { label: 'Sugestão', icon: '🤖', color: 'var(--accent)' };
+        };
+
+        // Modo de edição
+        if (editingDraft) {
+          const editingItem = items.find((it) => it.id === editingDraft.id);
+          if (editingItem) {
+            return (
+              <div style={{ borderTop: '1px solid var(--accent-border)', background: 'var(--glass)' }}>
+                <div style={{ padding: '12px 20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <Pencil size={12} style={{ color: 'var(--accent)' }} />
+                    <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Editando resposta da IA
+                    </span>
+                    <button onClick={() => { setEditingDraft(null); setMsgText(''); }} style={{ marginLeft: 'auto', padding: 4, background: 'none', border: 'none', color: 'var(--fg-subtle)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <textarea
+                    value={msgText}
+                    onChange={(e) => setMsgText(e.target.value)}
+                    rows={3}
+                    autoFocus
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 13, color: 'var(--fg-dim)', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5, outline: 'none' }}
+                  />
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'flex-end' }}>
+                    <button
+                      onClick={() => { setEditingDraft(null); setMsgText(''); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, background: 'var(--surface-3)', color: 'var(--fg-muted)', fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', cursor: 'pointer' }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const corrected = msgText.trim();
+                        if (!corrected) return;
+                        const originalAI = editingItem.content;
+                        const allIds = items.map((s) => s.id);
+                        setEditingDraft(null);
+                        setMsgText('');
+                        useDashboardStore.setState((state) => ({
+                          conversations: state.conversations.map((c) =>
+                            c.id === conv.id ? { ...c, messages: c.messages.filter((m) => !allIds.includes(m.id)), status: 'aguardando_humano' } : c
+                          ),
+                        }));
+                        supabase.functions.invoke('evolution-send', { body: { conversationId: conv.id, text: corrected } });
+                        await supabase.from('messages').delete().in('id', allIds);
+                        await supabase.from('conversations').update({ status: 'aguardando_humano' }).eq('id', conv.id);
+                        if (corrected !== originalAI) await saveTrainingExample(originalAI, corrected);
+                      }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, background: 'var(--emerald)', color: '#fff', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer' }}
+                    >
+                      <Send size={12} /> Enviar editado
+                    </button>
+                  </div>
                 </div>
               </div>
-            )}
+            );
+          }
+        }
 
-            {/* Action buttons */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px' }}>
-              <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, flex: 1 }}>
-                Sugestão da IA — revisar e aprovar?
+        return (
+          <div style={{
+            borderTop: '1px solid var(--accent-border)',
+            background: 'linear-gradient(to bottom, rgba(212, 175, 55, 0.06), rgba(212, 175, 55, 0.02))',
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px 8px' }}>
+              <Bot size={14} style={{ color: 'var(--accent)' }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                {items.length > 1 ? `${items.length} Sugestões da IA` : 'Sugestão da IA'}
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
+                · Escolha uma ou edite antes de enviar
               </span>
               <button
-                onClick={async () => {
-                  const text = lastDraft.content;
-                  const draftId = lastDraft.id;
-                  removeDraft(draftId);
-                  supabase.functions.invoke('evolution-send', { body: { conversationId: conv.id, text } });
-                  await supabase.from('messages').delete().eq('id', draftId);
-                }}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, background: 'var(--emerald)', color: '#fff', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer' }}
-              >
-                <CheckCircle size={12} /> Enviar
-              </button>
-              <button
-                onClick={() => {
-                  setEditingDraft(lastDraft);
-                  setMsgText(lastDraft.content);
-                  inputRef.current?.focus();
-                }}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, background: 'var(--surface-3)', color: 'var(--fg-dim)', fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', cursor: 'pointer' }}
-              >
-                <Pencil size={12} /> Editar
-              </button>
-              <button
-                onClick={async () => {
-                  const draftId = lastDraft.id;
-                  removeDraft(draftId);
-                  await supabase.from('messages').delete().eq('id', draftId);
-                }}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, background: 'var(--surface-3)', color: 'var(--fg-muted)', fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', cursor: 'pointer' }}
+                onClick={discardAll}
+                title="Descartar todas"
+                style={{ marginLeft: 'auto', padding: 4, background: 'none', border: 'none', color: 'var(--fg-subtle)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}
               >
                 <Trash2 size={12} /> Descartar
               </button>
+            </div>
+
+            {/* Cards de sugestões */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: items.length > 1 ? '1fr 1fr' : '1fr',
+              gap: 10,
+              padding: '0 20px 12px',
+            }}>
+              {items.map((s) => {
+                const st = styleLabel(s.suggestionStyle);
+                const conf = s.suggestionConfidence;
+                return (
+                  <div
+                    key={s.id}
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      background: 'var(--glass)',
+                      border: '1px solid var(--border)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--accent-border)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)'; }}
+                  >
+                    {/* Header do card */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 14 }}>{st.icon}</span>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: st.color }}>{st.label}</span>
+                      </div>
+                      {conf !== null && conf !== undefined && (
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: 10,
+                          background: `${confidenceColor(conf)}20`,
+                          color: confidenceColor(conf),
+                        }}>
+                          {conf}% certeza
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Conteúdo */}
+                    <p style={{ fontSize: 13, color: 'var(--fg-dim)', lineHeight: 1.5, margin: 0, whiteSpace: 'pre-wrap' }}>
+                      {s.content}
+                    </p>
+
+                    {/* Ações */}
+                    <div style={{ display: 'flex', gap: 6, marginTop: 'auto' }}>
+                      <button
+                        onClick={() => approveAndSend(s)}
+                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, background: 'var(--emerald)', color: '#fff', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer' }}
+                      >
+                        <CheckCircle size={12} /> Enviar
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingDraft(s);
+                          setMsgText(s.content);
+                        }}
+                        title="Editar antes de enviar"
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, background: 'var(--surface-3)', color: 'var(--fg-dim)', fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', cursor: 'pointer' }}
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         );

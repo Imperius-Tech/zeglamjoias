@@ -12,9 +12,23 @@ export interface Message {
   sentBy?: 'panel' | 'phone' | 'ai' | null;
   isDraft?: boolean;
   mediaAnalysis?: { is_payment_proof?: boolean; type?: string; description?: string; payment_value?: string; confidence?: number } | null;
+  suggestionGroupId?: string | null;
+  suggestionConfidence?: number | null;
+  suggestionStyle?: 'direct' | 'warm' | null;
 }
 
 export type ConversationType = 'business' | 'personal' | 'unknown';
+
+export type GroupCandidateStatus = 'aguardando_dados' | 'dados_coletados' | 'adicionada' | 'recusada' | null;
+
+export interface GroupCandidateData {
+  nome_completo?: string | null;
+  nome_marca?: string | null;
+  cidade?: string | null;
+  galvanica?: string | null;
+  outro_grupo?: 'sim' | 'não' | string | null;
+  outro_grupo_nome?: string | null;
+}
 
 export interface Conversation {
   id: string;
@@ -28,6 +42,10 @@ export interface Conversation {
   aiAnalysis?: any;
   messages: Message[];
   lastMessageAt: Date;
+  whatsappJid?: string | null;
+  isGroup?: boolean;
+  groupCandidateStatus?: GroupCandidateStatus;
+  groupCandidateData?: GroupCandidateData | null;
 }
 
 export interface KnowledgeEntry {

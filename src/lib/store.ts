@@ -15,7 +15,7 @@ const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 interface DashboardState {
   conversations: Conversation[];
   selectedConversationId: string | null;
-  conversationFilter: 'all' | ConversationStatus;
+  conversationFilter: 'all' | ConversationStatus | 'adicionar_grupo';
   searchQuery: string;
   knowledgeEntries: KnowledgeEntry[];
   selectedCategory: CategoryKey | null;
@@ -25,7 +25,7 @@ interface DashboardState {
   loadConversations: () => Promise<void>;
   loadKnowledgeEntries: () => Promise<void>;
   selectConversation: (id: string | null) => void;
-  setFilter: (filter: 'all' | ConversationStatus) => void;
+  setFilter: (filter: 'all' | ConversationStatus | 'adicionar_grupo') => void;
   setSearchQuery: (query: string) => void;
   takeoverConversation: (id: string) => Promise<void>;
   setSelectedCategory: (category: CategoryKey | null) => void;
@@ -52,10 +52,26 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       return;
     }
 
-    const { data: convos } = await supabase
+    // Busca a instância Evolution ativa para filtrar conversas
+    const { data: evoConfig } = await supabase
+      .from('evolution_config')
+      .select('active_instance_id')
+      .limit(1)
+      .maybeSingle();
+
+    const activeInstanceId = evoConfig?.active_instance_id || null;
+
+    // Se tem instância ativa, filtra por ela. Se não tem, mostra tudo (fallback)
+    let convosQuery = supabase
       .from('conversations')
       .select('*')
       .order('last_message_at', { ascending: false });
+
+    if (activeInstanceId) {
+      convosQuery = convosQuery.eq('instance_id', activeInstanceId);
+    }
+
+    const { data: convos } = await convosQuery;
 
     if (!convos) return;
 
@@ -75,6 +91,10 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       unreadCount: c.unread_count,
       aiAnalysis: c.ai_analysis,
       lastMessageAt: new Date(c.last_message_at),
+      whatsappJid: c.whatsapp_jid || null,
+      isGroup: typeof c.whatsapp_jid === 'string' && c.whatsapp_jid.endsWith('@g.us'),
+      groupCandidateStatus: c.group_candidate_status || null,
+      groupCandidateData: c.group_candidate_data || null,
       messages: (msgs ?? [])
         .filter((m) => m.conversation_id === c.id)
         .map((m) => ({
@@ -89,6 +109,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
           sentBy: m.sent_by as Message['sentBy'] || null,
           isDraft: m.is_draft || false,
           mediaAnalysis: m.media_analysis || null,
+          suggestionGroupId: m.suggestion_group_id || null,
+          suggestionConfidence: m.suggestion_confidence ?? null,
+          suggestionStyle: (m.suggestion_style as Message['suggestionStyle']) || null,
         })),
     }));
 
@@ -221,6 +244,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
           sentBy: m.sent_by as Message['sentBy'] || null,
           isDraft: m.is_draft || false,
           mediaAnalysis: m.media_analysis || null,
+          suggestionGroupId: m.suggestion_group_id || null,
+          suggestionConfidence: m.suggestion_confidence ?? null,
+          suggestionStyle: (m.suggestion_style as Message['suggestionStyle']) || null,
         };
 
         set((state) => ({
@@ -256,6 +282,16 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
           ),
         }));
       })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
+        const oldMsg = payload.old as any;
+        if (!oldMsg?.id) return;
+        set((state) => ({
+          conversations: state.conversations.map((c) => ({
+            ...c,
+            messages: c.messages.filter((msg) => msg.id !== oldMsg.id),
+          })),
+        }));
+      })
       .subscribe();
 
     // Listen for conversation updates (unread count, status, name)
@@ -276,6 +312,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
                   conversationType: (c.conversation_type as ConversationType) || conv.conversationType,
                   aiEnabled: c.ai_enabled ?? conv.aiEnabled,
                   aiAnalysis: c.ai_analysis ?? conv.aiAnalysis,
+                  groupCandidateStatus: c.group_candidate_status ?? conv.groupCandidateStatus,
+                  groupCandidateData: c.group_candidate_data ?? conv.groupCandidateData,
                 }
               : conv
           ).sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime()),

@@ -6,8 +6,9 @@ import ConversasPage from '@/pages/ConversasPage';
 import ConhecimentoPage from '@/pages/ConhecimentoPage';
 import ClientesPage from '@/pages/ClientesPage';
 import ComprovantesPage from '@/pages/ComprovantesPage';
+import AutomacoesPage from '@/pages/AutomacoesPage';
+import MetricasPage from '@/pages/MetricasPage';
 import ConfiguracoesPage from '@/pages/ConfiguracoesPage';
-import PlaceholderPage from '@/pages/PlaceholderPage';
 import LoginPage from '@/pages/LoginPage';
 
 export default function App() {
@@ -36,16 +37,8 @@ export default function App() {
                 <Route path="/conhecimento" element={<ConhecimentoPage />} />
                 <Route path="/clientes" element={<ClientesPage />} />
                 <Route path="/comprovantes" element={<ComprovantesPage />} />
-                <Route
-                  path="/metricas"
-                  element={
-                    <PlaceholderPage
-                      title="Métricas"
-                      description="Em breve, acompanhe métricas de atendimento, taxa de resolução da IA, tempo de resposta e satisfação dos clientes."
-                      icon="BarChart3"
-                    />
-                  }
-                />
+                <Route path="/automacoes" element={<AutomacoesPage />} />
+                <Route path="/metricas" element={<MetricasPage />} />
                 <Route path="/configuracoes" element={<ConfiguracoesPage />} />
               </Routes>
             </DashboardShell>

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Search, Phone, MessageSquare, Clock, Users, Calendar, ArrowRight, Brain, RefreshCw, Loader, Target, TrendingUp, Tag, AlertCircle } from 'lucide-react';
+import { Search, Phone, MessageSquare, Clock, Users, Calendar, ArrowRight, Brain, RefreshCw, Loader, Target, TrendingUp, Tag, AlertCircle, UserPlus, CheckCircle2, Circle } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDashboardStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
@@ -237,6 +237,86 @@ function AIAnalysisPanel({ conversationId }: { conversationId: string }) {
   );
 }
 
+function GroupCandidateProfilePanel({ conv }: { conv: Conversation }) {
+  const data = conv.groupCandidateData;
+  const status = conv.groupCandidateStatus;
+  if (!status || !data) return null;
+
+  const fields: { key: keyof NonNullable<typeof data>; label: string }[] = [
+    { key: 'nome_completo', label: 'Nome completo' },
+    { key: 'nome_marca', label: 'Marca' },
+    { key: 'cidade', label: 'Cidade' },
+    { key: 'galvanica', label: 'Galvânica' },
+    { key: 'outro_grupo', label: 'Outro grupo?' },
+    { key: 'outro_grupo_nome', label: 'Nome do outro grupo' },
+  ];
+
+  const statusConfig = {
+    aguardando_dados: { label: 'Coletando dados', color: '#fbbf24', bg: 'rgba(251,191,36,0.1)', border: 'rgba(251,191,36,0.25)' },
+    dados_coletados: { label: 'Pronta para adicionar', color: 'var(--emerald-light)', bg: 'rgba(16,185,129,0.1)', border: 'rgba(16,185,129,0.3)' },
+    adicionada: { label: 'Já adicionada ao grupo', color: '#60a5fa', bg: 'rgba(59,130,246,0.1)', border: 'rgba(59,130,246,0.25)' },
+    recusada: { label: 'Recusada', color: 'var(--fg-subtle)', bg: 'var(--glass)', border: 'var(--border)' },
+  };
+  const s = statusConfig[status as keyof typeof statusConfig] || statusConfig.aguardando_dados;
+
+  return (
+    <div style={{
+      marginBottom: 24,
+      padding: 16,
+      borderRadius: 14,
+      background: s.bg,
+      border: `1px solid ${s.border}`,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        <UserPlus size={15} style={{ color: s.color }} />
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--strong-text)' }}>
+          Cadastro para entrada no grupo
+        </span>
+        <span style={{
+          marginLeft: 'auto',
+          fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase',
+          padding: '3px 8px', borderRadius: 6,
+          background: s.border, color: s.color,
+        }}>
+          {s.label}
+        </span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        {fields.map((f) => {
+          const val = data[f.key];
+          const filled = !!val;
+          return (
+            <div key={f.key} style={{
+              display: 'flex', flexDirection: 'column', gap: 3,
+              padding: '10px 12px', borderRadius: 10,
+              background: 'var(--glass)',
+              border: '1px solid var(--border)',
+              opacity: filled ? 1 : 0.55,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                {filled
+                  ? <CheckCircle2 size={11} style={{ color: 'var(--emerald-light)' }} />
+                  : <Circle size={11} style={{ color: 'var(--fg-subtle)' }} />
+                }
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--fg-subtle)' }}>
+                  {f.label}
+                </span>
+              </div>
+              <span style={{
+                fontSize: 13, color: filled ? 'var(--strong-text)' : 'var(--fg-subtle)',
+                fontStyle: filled ? 'normal' : 'italic',
+                wordBreak: 'break-word',
+              }}>
+                {filled ? (val as string) : 'não informado'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ClientDetail({ conv, onOpenChat }: { conv: Conversation; onOpenChat: () => void }) {
   const totalMessages = conv.messages.length;
   const clientMessages = conv.messages.filter((m) => m.author === 'cliente').length;
@@ -287,6 +367,9 @@ function ClientDetail({ conv, onOpenChat }: { conv: Conversation; onOpenChat: ()
       >
         <MessageSquare size={16} /> Abrir conversa <ArrowRight size={14} />
       </button>
+
+      {/* Dados de Cadastro do Grupo */}
+      <GroupCandidateProfilePanel conv={conv} />
 
       {/* AI Analysis */}
       <div style={{ marginBottom: 24 }}>

@@ -1,6 +1,8 @@
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { MessageSquare, BookOpen, FileCheck, BarChart3, Settings, X, Users, Zap } from 'lucide-react';
+import { MessageSquare, BookOpen, FileCheck, BarChart3, Settings, X, Users, Zap, LogOut, RefreshCw, Loader } from 'lucide-react';
 import { useDashboardStore } from '@/lib/store';
+import { supabase } from '@/lib/supabase';
 
 const navItems = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare, badge: true },
@@ -15,7 +17,22 @@ const navItems = [
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { pathname } = useLocation();
   const conversations = useDashboardStore((s) => s.conversations);
+  const loadConversations = useDashboardStore((s) => s.loadConversations);
   const unreadTotal = conversations.reduce((a, c) => a + c.unreadCount, 0);
+  const [switching, setSwitching] = useState(false);
+  const [currentInst, setCurrentInst] = useState<string>('');
+
+  useEffect(() => {
+    supabase.from('evolution_config').select('active_instance_id').limit(1).maybeSingle().then(({ data }) => {
+      if (data) setCurrentInst(data.active_instance_id);
+    });
+  }, []);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+  };
+
+  const activeInstanceName = useDashboardStore((s) => s.activeInstanceName);
 
   return (
     <>
@@ -39,8 +56,15 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               <img src="/zeglam.png" alt="Zeglam" style={{ width: 32, height: 32, borderRadius: 8 }} />
               <span style={{ fontSize: 18, fontWeight: 900, letterSpacing: '-0.04em', color: 'var(--strong-text)' }}>ZEGLAM</span>
               <span style={{ position: 'relative', width: 8, height: 8, display: 'inline-flex' }}>
-                <span className="anim-ping" style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--accent)', opacity: 0.75 }} />
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }} />
+                {unreadTotal > 0 && (
+                  <span className="anim-ping" style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--accent)', opacity: 0.75 }} />
+                )}
+                <span style={{ 
+                  width: 8, height: 8, borderRadius: '50%', 
+                  background: unreadTotal > 0 ? 'var(--accent)' : 'var(--emerald)',
+                  boxShadow: unreadTotal > 0 ? '0 0 10px var(--accent)' : 'none',
+                  transition: 'all 0.3s'
+                }} />
               </span>
             </div>
             <button onClick={onClose} className="hide-desktop" style={{ padding: 4, borderRadius: 8, background: 'none', border: 'none', color: 'var(--fg-muted)', cursor: 'pointer' }}>
@@ -97,14 +121,27 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               background: 'linear-gradient(135deg, var(--accent), var(--accent-sec))',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 14, fontWeight: 700, color: 'var(--strong-text)',
-            }}>Z</div>
+            }}>{activeInstanceName?.[0]?.toUpperCase() || 'W'}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <p className="truncate" style={{ fontSize: 14, fontWeight: 600, color: 'var(--strong-text)' }}>Zevaldo Gama</p>
+              <p className="truncate" style={{ fontSize: 14, fontWeight: 600, color: 'var(--strong-text)' }}>{activeInstanceName || 'WhatsApp'}</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--emerald)' }} />
                 <span style={{ fontSize: 11, color: 'var(--emerald-light)' }}>Online</span>
               </div>
             </div>
+            <button
+              onClick={handleSignOut}
+              title="Sair"
+              style={{
+                width: 32, height: 32, borderRadius: 8, background: 'rgba(239,68,68,0.1)',
+                border: 'none', color: '#fca5a5', display: 'flex', alignItems: 'center',
+                justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s',
+              }}
+              onMouseOver={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.2)'}
+              onMouseOut={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         </div>
       </aside>

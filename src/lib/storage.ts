@@ -37,6 +37,8 @@ export interface NotificationSettings {
   inactivityMinutes: number;
   dailySummary: boolean;
   sound: boolean;
+  soundVolume: number;
+  incomingSound: 'default' | 'elegant' | 'modern';
 }
 
 export interface AccountSettings {
@@ -85,6 +87,8 @@ const defaults: AppSettings = {
     inactivityMinutes: 10,
     dailySummary: false,
     sound: true,
+    soundVolume: 0.5,
+    incomingSound: 'elegant',
   },
   account: {
     fullName: 'Zevaldo Gama',

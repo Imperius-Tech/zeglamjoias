@@ -34,23 +34,19 @@ export function ChatView() {
   const [aiGenerating, setAiGenerating] = useState(false);
   const [togglingAI, setTogglingAI] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editingDraft, setEditingDraft] = useState<Message | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [conv?.messages.length, selectedId]);
 
-  // Trigger automatic analysis if missing
   useEffect(() => {
     if (conv && !conv.aiAnalysis && conv.messages.length >= 2) {
       supabase.functions.invoke('evolution-client-analysis', { body: { conversationId: conv.id } });
     }
   }, [selectedId]);
 
-  // Auto-geração de sugestões quando o atendente abre um lead não respondido.
-  // Dispara apenas uma vez por mensagem do cliente (cache por ID da última msg).
-  // Critérios: unread > 0, última msg do cliente sem resposta, não é grupo,
-  // não está em fluxo de entrada no grupo, não tem sugestões ativas.
   useEffect(() => {
     if (!conv) return;
     if (conv.isGroup) return;
@@ -88,179 +84,88 @@ export function ChatView() {
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      {/* Header */}
-      <div style={{ minHeight: 64, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '12px 20px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--header-bg)', backdropFilter: 'blur(12px)', gap: 12 }}>
-        
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-          
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+      {/* Header - Aligned 72px */}
+      <div style={{ height: 72, display: 'flex', alignItems: 'center', padding: '0 20px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--header-bg)', backdropFilter: 'blur(12px)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {conv.profilePicUrl ? (
               <img src={conv.profilePicUrl} alt={conv.customerName} style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover' }} />
             ) : (
               <div style={{ width: 40, height: 40, borderRadius: '50%', background: pickGradient(conv.customerName), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 700, color: '#fff', flexShrink: 0 }}>{conv.customerName[0]?.toUpperCase()}</div>
             )}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--strong-text)', flexShrink: 0, letterSpacing: '-0.01em' }}>{conv.customerName}</span>
-                
-                {/* Type Status: P (Pessoal) or N (Negócio) */}
-                {conv.conversationType === 'personal' && (
-                  <span style={{ 
-                    fontSize: 9, padding: '1px 5px', borderRadius: 4, 
-                    background: 'rgba(139,92,246,0.15)', color: '#a78bfa', fontWeight: 900,
-                    flexShrink: 0
-                  }}>P</span>
-                )}
-                {conv.conversationType === 'business' && (
-                  <span style={{ 
-                    fontSize: 9, padding: '1px 5px', borderRadius: 4, 
-                    background: 'rgba(16,185,129,0.15)', color: 'var(--emerald-light)', fontWeight: 900,
-                    flexShrink: 0
-                  }}>N</span>
-                )}
-
-                <span style={{ fontSize: 10, fontWeight: 600, color: st.color, padding: '2px 8px', borderRadius: 6, background: 'var(--glass-strong)', flexShrink: 0 }}>{st.label}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--strong-text)', letterSpacing: '-0.01em' }}>{conv.customerName}</span>
+                {conv.conversationType === 'personal' && <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: 'rgba(139,92,246,0.15)', color: '#a78bfa', fontWeight: 900 }}>P</span>}
+                {conv.conversationType === 'business' && <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: 'rgba(16,185,129,0.15)', color: 'var(--emerald-light)', fontWeight: 900 }}>N</span>}
+                <span style={{ fontSize: 10, fontWeight: 600, color: st.color, padding: '2px 8px', borderRadius: 6, background: 'var(--glass-strong)' }}>{st.label}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-subtle)' }}>
-                <Phone size={12} /><span>{conv.customerPhone}</span>
+                <Phone size={11} /><span>{conv.customerPhone}</span>
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            {/* Grupo: IA bloqueada por design — nunca responder em grupos */}
-            {conv.isGroup ? (
-              <div
-                title="A IA não responde em grupos por política de segurança"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
-                  background: 'rgba(148,163,184,0.08)',
-                  border: '1px dashed var(--border)',
-                  color: 'var(--fg-subtle)', fontSize: 11, fontWeight: 600,
-                  cursor: 'not-allowed', opacity: 0.7,
-                }}
-              >
-                <Power size={12} />
-                IA bloqueada em grupos
-              </div>
-            ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {!conv.isGroup && (
               <>
-                {/* AI toggle for this conversation */}
                 <button
                   onClick={async () => {
                     if (togglingAI) return;
-                    if (conv.isGroup) { alert('A IA não pode ser ativada em grupos por política de segurança.'); return; }
                     setTogglingAI(true);
                     const newVal = !conv.aiEnabled;
-                    useDashboardStore.setState((state) => ({
-                      conversations: state.conversations.map((c) => c.id === conv.id ? { ...c, aiEnabled: newVal } : c),
-                    }));
+                    useDashboardStore.setState((state) => ({ conversations: state.conversations.map((c) => c.id === conv.id ? { ...c, aiEnabled: newVal } : c) }));
                     await supabase.from('conversations').update({ ai_enabled: newVal }).eq('id', conv.id);
                     setTogglingAI(false);
                   }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
-                    background: conv.aiEnabled ? 'rgba(16,185,129,0.1)' : 'var(--glass)',
-                    border: `1px solid ${conv.aiEnabled ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`,
-                    color: conv.aiEnabled ? 'var(--emerald-light)' : 'var(--fg-subtle)',
-                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, background: conv.aiEnabled ? 'rgba(16,185,129,0.1)' : 'var(--glass)', border: `1px solid ${conv.aiEnabled ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`, color: conv.aiEnabled ? 'var(--emerald-light)' : 'var(--fg-subtle)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
                 >
-                  <Power size={12} />
-                  {conv.aiEnabled ? 'IA Ativa' : 'IA Off'}
+                  <Power size={12} /> {conv.aiEnabled ? 'IA Ativa' : 'IA Off'}
                 </button>
-
-                {/* Generate AI response */}
                 <button
                   onClick={async () => {
-                    if (aiGenerating) return;
-                    if (conv.isGroup) { alert('A IA não pode gerar respostas para grupos.'); return; }
-                    setAiGenerating(true);
-                    try {
-                      const { data, error } = await supabase.functions.invoke('evolution-ai-reply', { body: { conversationId: conv.id, force: true, mode: 'suggestions' } });
-                      if (error || data?.error) {
-                        alert(data?.error || 'Erro ao gerar resposta. Tente novamente.');
-                      } else if (data?.action === 'silenced') {
-                        alert('A IA não tem certeza da resposta para este contexto.');
-                      } else if (data?.reason === 'group_blocked' || data?.reason === 'group_blocked_send') {
-                        alert('A IA não responde em grupos por política de segurança.');
-                      }
-                    } catch {
-                      alert('Erro de conexão. Tente novamente.');
-                    }
-                    setAiGenerating(false);
+                    if (analyzing) return;
+                    setAnalyzing(true);
+                    await supabase.functions.invoke('evolution-client-analysis', { body: { conversationId: conv.id, forceRefresh: true } });
+                    setAnalyzing(false);
                   }}
-                  disabled={aiGenerating}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
-                    background: 'var(--glass)', border: '1px solid var(--border)',
-                    color: 'var(--fg-muted)', fontSize: 11, fontWeight: 500,
-                    cursor: aiGenerating ? 'wait' : 'pointer', opacity: aiGenerating ? 0.5 : 1,
-                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-muted)', fontSize: 11, fontWeight: 500, cursor: analyzing ? 'wait' : 'pointer' }}
                 >
-                  {aiGenerating ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Bot size={12} />}
-                  {aiGenerating ? 'Gerando...' : 'Gerar IA'}
+                  {analyzing ? <Loader size={12} className="spin" /> : <Sparkles size={12} />} Analisar
+                </button>
+                <button
+                  onClick={async () => {
+                    if (syncing) return;
+                    setSyncing(true);
+                    await supabase.functions.invoke('evolution-media-download', { body: { conversationId: conv.id, limit: 100 } });
+                    // Refresh local data
+                    useDashboardStore.getState().loadConversations();
+                    setSyncing(false);
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-muted)', fontSize: 11, fontWeight: 500, cursor: syncing ? 'wait' : 'pointer' }}
+                >
+                  {syncing ? <Loader size={12} className="spin" /> : <Loader size={12} />} Sincronizar
+                </button>
+                <button onClick={() => navigate(`/clientes?id=${conv.id}`)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-muted)', fontSize: 11, fontWeight: 500, cursor: 'pointer' }}>
+                  <User size={12} /> Cliente
                 </button>
               </>
             )}
-
-            {/* Analyze client (force refresh) */}
-            <button
-              onClick={async () => {
-                if (analyzing) return;
-                setAnalyzing(true);
-                try {
-                  const { data, error } = await supabase.functions.invoke('evolution-client-analysis', {
-                    body: { conversationId: conv.id, forceRefresh: true },
-                  });
-                  if (error || data?.error) {
-                    alert(data?.error || 'Erro ao analisar cliente. Tente novamente.');
-                  }
-                } catch {
-                  alert('Erro de conexão. Tente novamente.');
-                }
-                setAnalyzing(false);
-              }}
-              disabled={analyzing}
-              title="Forçar nova análise do cliente (resumo, interesses, estágio)"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
-                background: analyzing ? 'rgba(212,175,55,0.1)' : 'var(--glass)',
-                border: `1px solid ${analyzing ? 'var(--accent-border)' : 'var(--border)'}`,
-                color: analyzing ? 'var(--accent)' : 'var(--fg-muted)',
-                fontSize: 11, fontWeight: 500,
-                cursor: analyzing ? 'wait' : 'pointer', opacity: analyzing ? 0.7 : 1,
-              }}
-            >
-              {analyzing ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Sparkles size={12} />}
-              {analyzing ? 'Analisando...' : 'Analisar'}
-            </button>
-
-            {/* Client analysis shortcut */}
-            <button
-              onClick={() => navigate(`/clientes?id=${conv.id}`)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8,
-                background: 'var(--glass)', border: '1px solid var(--border)',
-                color: 'var(--fg-muted)', fontSize: 11, fontWeight: 500, cursor: 'pointer',
-              }}
-            >
-              <User size={12} /> Cliente
-            </button>
           </div>
         </div>
+      </div>
 
-        {/* Beautiful AI Summary Box */}
-        {conv.aiAnalysis?.resumo && (
+      {/* AI Summary (Fixed below header) */}
+      {conv.aiAnalysis?.resumo && (
+        <div style={{ padding: '8px 20px', background: 'var(--header-bg)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', background: 'linear-gradient(to right, rgba(212, 175, 55, 0.08), rgba(212, 175, 55, 0.02))', borderLeft: '3px solid var(--accent)', borderRadius: '0 8px 8px 0' }}>
             <Brain size={14} style={{ color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
-            <p style={{ fontSize: 12, color: 'var(--fg-dim)', lineHeight: 1.5, margin: 0 }}>
-              <strong style={{ fontWeight: 600, color: 'var(--accent)', marginRight: 6 }}>Contexto IA:</strong> 
-              {conv.aiAnalysis.resumo}
+            <p style={{ fontSize: 12, color: 'var(--fg-dim)', lineHeight: 1.4, margin: 0 }}>
+              <strong style={{ fontWeight: 600, color: 'var(--accent)', marginRight: 6 }}>Contexto IA:</strong> {conv.aiAnalysis.resumo}
             </p>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Group Candidate Card */}
       <GroupCandidateCard conv={conv} />
@@ -278,7 +183,7 @@ export function ChatView() {
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {conv.messages
-            .filter((msg) => !msg.suggestionGroupId) // Sugestões aparecem no painel separado
+            .filter((msg) => !msg.suggestionGroupId)
             .map((msg) => (
               <MessageBubble
                 key={msg.id}
@@ -287,100 +192,17 @@ export function ChatView() {
                 onReply={(m) => { setReplyTo(m); inputRef.current?.focus(); }}
               />
             ))}
-          {(() => {
-            // "IA Pensando" só aparece quando:
-            // 1. IA está ativa na conversa
-            // 2. Última mensagem real (não-draft) é do cliente
-            // 3. Status é ia_respondendo
-            // 4. Ainda NÃO tem sugestões disponíveis (senão o painel de sugestões aparece)
-            // 5. Ainda NÃO tem resposta da IA depois da última mensagem do cliente
-            if (!conv.aiEnabled) return null;
-            if (conv.status !== 'ia_respondendo') return null;
-
-            const realMessages = conv.messages.filter((m) => !m.isDraft);
-            const last = realMessages[realMessages.length - 1];
-            if (!last || last.author !== 'cliente') return null;
-
-            const hasSuggestions = conv.messages.some((m) => m.isDraft && m.suggestionGroupId);
-            if (hasSuggestions) return null;
-
-            // Se última mensagem foi há mais de 2 minutos, não está mais "pensando"
-            const lastTs = last.timestamp instanceof Date ? last.timestamp : new Date(last.timestamp);
-            const ageMs = Date.now() - lastTs.getTime();
-            if (ageMs > 2 * 60 * 1000) return null;
-
-            return (
-              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent)', marginBottom: 4, paddingRight: 4 }}>
-                      IA Pensando
-                    </span>
-                    <div style={{
-                      padding: '12px 16px',
-                      borderRadius: '16px 16px 4px 16px',
-                      background: 'rgba(212, 175, 55, 0.08)',
-                      border: '1px solid rgba(212, 175, 55, 0.2)',
-                      display: 'flex', alignItems: 'center', gap: 4, height: 44
-                    }}>
-                      <div className="thinking-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
-                      <div className="thinking-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
-                      <div className="thinking-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            );
-          })()}
           <div ref={endRef} />
         </div>
       </div>
 
-      {/* AI Suggestions Panel — 2 respostas sugeridas */}
+      {/* AI Suggestions Panel */}
       {(() => {
-        // Agrupa drafts de sugestão pela mesma group_id
         const suggestions = conv.messages.filter((m) => m.isDraft && m.suggestionGroupId);
-        // Também suporta drafts legacy (sem suggestion_group_id) pra compatibilidade
-        const legacyDraft = conv.messages.find((m) => m.isDraft && !m.suggestionGroupId);
-
-        if (suggestions.length === 0 && !legacyDraft) return null;
-
-        // Ordena sugestões: direct primeiro, warm depois
-        const ordered = [...suggestions].sort((a, b) => {
-          if (a.suggestionStyle === 'direct') return -1;
-          if (b.suggestionStyle === 'direct') return 1;
-          return 0;
-        });
-
-        const items = ordered.length > 0
-          ? ordered
-          : legacyDraft ? [legacyDraft] : [];
-
-        const removeFromStore = (ids: string[]) => {
-          useDashboardStore.setState((state) => ({
-            conversations: state.conversations.map((c) =>
-              c.id === conv.id ? { ...c, messages: c.messages.filter((m) => !ids.includes(m.id)) } : c
-            ),
-          }));
-        };
-
-        const saveTrainingExample = async (aiOriginal: string, corrected: string) => {
-          const context = conv.messages
-            .filter((m) => !m.isDraft)
-            .slice(-5)
-            .map((m) => `${m.author === 'cliente' ? 'Cliente' : 'Atendente'}: ${m.content}`)
-            .join('\n');
-          await supabase.from('ai_training_examples').insert({
-            conversation_id: conv.id,
-            context,
-            ai_response: aiOriginal,
-            corrected_response: corrected,
-          });
-        };
+        if (suggestions.length === 0) return null;
 
         const approveAndSend = async (chosen: Message) => {
-          const allIds = items.map((s) => s.id);
-          // Otimistic UI: remove drafts e marca status como aguardando
+          const allIds = suggestions.map((s) => s.id);
           useDashboardStore.setState((state) => ({
             conversations: state.conversations.map((c) =>
               c.id === conv.id ? { ...c, messages: c.messages.filter((m) => !allIds.includes(m.id)), status: 'aguardando_humano' } : c
@@ -392,8 +214,7 @@ export function ChatView() {
         };
 
         const discardAll = async () => {
-          const allIds = items.map((s) => s.id);
-          // Otimistic UI: remove drafts e sai do estado "ia_respondendo"
+          const allIds = suggestions.map((s) => s.id);
           useDashboardStore.setState((state) => ({
             conversations: state.conversations.map((c) =>
               c.id === conv.id ? { ...c, messages: c.messages.filter((m) => !allIds.includes(m.id)), status: 'aguardando_humano' } : c
@@ -403,265 +224,61 @@ export function ChatView() {
           await supabase.from('conversations').update({ status: 'aguardando_humano' }).eq('id', conv.id);
         };
 
-        const confidenceColor = (c: number | null | undefined) => {
-          if (!c) return 'var(--fg-subtle)';
-          if (c >= 80) return 'var(--emerald-light)';
-          if (c >= 60) return '#fbbf24';
-          if (c >= 40) return '#fb923c';
-          return '#f87171';
-        };
-
-        const styleLabel = (s: Message['suggestionStyle']) => {
-          if (s === 'direct') return { label: 'Direto', icon: '⚡', color: '#60a5fa' };
-          if (s === 'warm') return { label: 'Acolhedor', icon: '💛', color: '#fbbf24' };
-          return { label: 'Sugestão', icon: '🤖', color: 'var(--accent)' };
-        };
-
-        // Modo de edição
-        if (editingDraft) {
-          const editingItem = items.find((it) => it.id === editingDraft.id);
-          if (editingItem) {
-            return (
-              <div style={{ borderTop: '1px solid var(--accent-border)', background: 'var(--glass)' }}>
-                <div style={{ padding: '12px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                    <Pencil size={12} style={{ color: 'var(--accent)' }} />
-                    <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      Editando resposta da IA
-                    </span>
-                    <button onClick={() => { setEditingDraft(null); setMsgText(''); }} style={{ marginLeft: 'auto', padding: 4, background: 'none', border: 'none', color: 'var(--fg-subtle)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-                      <X size={14} />
-                    </button>
-                  </div>
-                  <textarea
-                    value={msgText}
-                    onChange={(e) => setMsgText(e.target.value)}
-                    rows={3}
-                    autoFocus
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 13, color: 'var(--fg-dim)', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5, outline: 'none' }}
-                  />
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'flex-end' }}>
-                    <button
-                      onClick={() => { setEditingDraft(null); setMsgText(''); }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, background: 'var(--surface-3)', color: 'var(--fg-muted)', fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', cursor: 'pointer' }}
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      onClick={async () => {
-                        const corrected = msgText.trim();
-                        if (!corrected) return;
-                        const originalAI = editingItem.content;
-                        const allIds = items.map((s) => s.id);
-                        setEditingDraft(null);
-                        setMsgText('');
-                        useDashboardStore.setState((state) => ({
-                          conversations: state.conversations.map((c) =>
-                            c.id === conv.id ? { ...c, messages: c.messages.filter((m) => !allIds.includes(m.id)), status: 'aguardando_humano' } : c
-                          ),
-                        }));
-                        supabase.functions.invoke('evolution-send', { body: { conversationId: conv.id, text: corrected } });
-                        await supabase.from('messages').delete().in('id', allIds);
-                        await supabase.from('conversations').update({ status: 'aguardando_humano' }).eq('id', conv.id);
-                        if (corrected !== originalAI) await saveTrainingExample(originalAI, corrected);
-                      }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, background: 'var(--emerald)', color: '#fff', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer' }}
-                    >
-                      <Send size={12} /> Enviar editado
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          }
-        }
-
         return (
-          <div style={{
-            borderTop: '1px solid var(--accent-border)',
-            background: 'linear-gradient(to bottom, rgba(212, 175, 55, 0.06), rgba(212, 175, 55, 0.02))',
-          }}>
-            {/* Header */}
+          <div style={{ borderTop: '1px solid var(--accent-border)', background: 'linear-gradient(to bottom, rgba(212, 175, 55, 0.06), rgba(212, 175, 55, 0.02))' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px 8px' }}>
               <Bot size={14} style={{ color: 'var(--accent)' }} />
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                {items.length > 1 ? `${items.length} Sugestões da IA` : 'Sugestão da IA'}
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-                · Escolha uma ou edite antes de enviar
-              </span>
-              <button
-                onClick={discardAll}
-                title="Descartar todas"
-                style={{ marginLeft: 'auto', padding: 4, background: 'none', border: 'none', color: 'var(--fg-subtle)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}
-              >
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Sugestões da IA</span>
+              <button onClick={discardAll} style={{ marginLeft: 'auto', padding: 4, background: 'none', border: 'none', color: 'var(--fg-subtle)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
                 <Trash2 size={12} /> Descartar
               </button>
             </div>
-
-            {/* Cards de sugestões */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: items.length > 1 ? '1fr 1fr' : '1fr',
-              gap: 10,
-              padding: '0 20px 12px',
-            }}>
-              {items.map((s) => {
-                const st = styleLabel(s.suggestionStyle);
-                const conf = s.suggestionConfidence;
-                return (
-                  <div
-                    key={s.id}
-                    style={{
-                      padding: 12,
-                      borderRadius: 12,
-                      background: 'var(--glass)',
-                      border: '1px solid var(--border)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 10,
-                      transition: 'all 0.15s',
-                    }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--accent-border)'; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)'; }}
-                  >
-                    {/* Header do card */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: 14 }}>{st.icon}</span>
-                        <span style={{ fontSize: 11, fontWeight: 600, color: st.color }}>{st.label}</span>
-                      </div>
-                      {conf !== null && conf !== undefined && (
-                        <span style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          padding: '2px 8px',
-                          borderRadius: 10,
-                          background: `${confidenceColor(conf)}20`,
-                          color: confidenceColor(conf),
-                        }}>
-                          {conf}% certeza
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Conteúdo */}
-                    <p style={{ fontSize: 13, color: 'var(--fg-dim)', lineHeight: 1.5, margin: 0, whiteSpace: 'pre-wrap' }}>
-                      {s.content}
-                    </p>
-
-                    {/* Ações */}
-                    <div style={{ display: 'flex', gap: 6, marginTop: 'auto' }}>
-                      <button
-                        onClick={() => approveAndSend(s)}
-                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, background: 'var(--emerald)', color: '#fff', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer' }}
-                      >
-                        <CheckCircle size={12} /> Enviar
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingDraft(s);
-                          setMsgText(s.content);
-                        }}
-                        title="Editar antes de enviar"
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, background: 'var(--surface-3)', color: 'var(--fg-dim)', fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', cursor: 'pointer' }}
-                      >
-                        <Pencil size={12} />
-                      </button>
-                    </div>
+            <div style={{ display: 'grid', gridTemplateColumns: suggestions.length > 1 ? '1fr 1fr' : '1fr', gap: 10, padding: '0 20px 12px' }}>
+              {suggestions.map((s) => (
+                <div key={s.id} style={{ padding: 12, borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <p style={{ fontSize: 13, color: 'var(--fg-dim)', lineHeight: 1.5, margin: 0, whiteSpace: 'pre-wrap' }}>{s.content}</p>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => approveAndSend(s)} style={{ flex: 1, padding: '8px 12px', borderRadius: 8, background: 'var(--emerald)', color: '#fff', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer' }}>Enviar</button>
+                    <button onClick={() => { setEditingDraft(s); setMsgText(s.content); }} style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--surface-3)', color: 'var(--fg-dim)', border: '1px solid var(--border)', cursor: 'pointer' }}><Pencil size={12} /></button>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
         );
       })()}
 
-      {/* Reply banner + Input */}
-      <div style={{ borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-        {replyTo && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '8px 16px', maxWidth: '100%',
-            background: 'var(--glass)',
-          }}>
-            <Reply size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-            <div style={{
-              flex: 1, padding: '6px 10px', borderRadius: 6, minWidth: 0,
-              borderLeft: `3px solid ${replyTo.author === 'cliente' ? 'var(--fg-subtle)' : 'var(--emerald)'}`,
-              background: 'rgba(255,255,255,0.02)',
-            }}>
-              <p style={{ fontSize: 10, fontWeight: 600, color: replyTo.author === 'cliente' ? 'var(--fg-muted)' : 'var(--emerald-light)' }}>
-                {replyTo.author === 'cliente' ? 'Cliente' : 'Você'}
-              </p>
-              <p style={{ fontSize: 12, color: 'var(--fg-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {replyTo.content}
-              </p>
-            </div>
-            <button onClick={() => setReplyTo(null)} style={{ padding: 4, background: 'none', border: 'none', color: 'var(--fg-subtle)', cursor: 'pointer' }}>
-              <X size={14} />
-            </button>
-          </div>
-        )}
-        <div style={{ padding: 16 }}>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!msgText.trim() || !conv) return;
-              const text = msgText.trim();
-              const quoted = replyTo?.id || null;
-              setMsgText('');
-              setReplyTo(null);
-
-              // Optimistic: add message locally immediately
-              const tempId = `temp-${Date.now()}`;
-              const optimisticMsg: Message = {
-                id: tempId,
-                author: 'humano',
-                content: text,
-                timestamp: new Date(),
-                status: 'sent',
-                quotedMessageId: quoted,
-                sentBy: 'panel',
-              };
-              useDashboardStore.setState((state) => ({
-                conversations: state.conversations.map((c) =>
-                  c.id === conv.id
-                    ? { ...c, messages: [...c.messages, optimisticMsg], lastMessageAt: new Date() }
-                    : c
-                ),
-              }));
-
-              // Send in background
-              supabase.functions.invoke('evolution-send', {
-                body: { conversationId: conv.id, text, quotedMessageId: quoted },
-              }).catch((err) => console.error('Send failed:', err));
-            }}
-            style={{ display: 'flex', alignItems: 'center', gap: 12, maxWidth: '100%' }}
-          >
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Digite uma mensagem..."
-              value={msgText}
-              onChange={(e) => setMsgText(e.target.value)}
-              style={{ flex: 1, height: 40, padding: '0 16px', borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)', fontSize: 14, color: 'var(--fg-dim)', outline: 'none' }}
-            />
-            <button
-              type="submit"
-              disabled={!msgText.trim()}
-              style={{
-                width: 40, height: 40, borderRadius: 12,
-                background: !msgText.trim() ? 'var(--surface-3)' : 'var(--accent)',
-                border: 'none', color: 'var(--strong-text)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: !msgText.trim() ? 'not-allowed' : 'pointer', flexShrink: 0,
-              }}
-            >
-              <Send size={16} />
-            </button>
-          </form>
-        </div>
+      {/* Input */}
+      <div style={{ borderTop: '1px solid var(--border)', padding: 16 }}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!msgText.trim() || !conv) return;
+            const text = msgText.trim();
+            setMsgText('');
+            setReplyTo(null);
+            const tempId = `temp-${Date.now()}`;
+            useDashboardStore.setState((state) => ({
+              conversations: state.conversations.map((c) =>
+                c.id === conv.id ? { ...c, messages: [...c.messages, { id: tempId, author: 'humano', content: text, timestamp: new Date(), status: 'sent' }], lastMessageAt: new Date() } : c
+              ),
+            }));
+            supabase.functions.invoke('evolution-send', { body: { conversationId: conv.id, text } });
+          }}
+          style={{ display: 'flex', alignItems: 'center', gap: 12 }}
+        >
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Digite uma mensagem..."
+            value={msgText}
+            onChange={(e) => setMsgText(e.target.value)}
+            style={{ flex: 1, height: 40, padding: '0 16px', borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)', fontSize: 14, color: 'var(--fg-dim)', outline: 'none' }}
+          />
+          <button type="submit" disabled={!msgText.trim()} style={{ width: 40, height: 40, borderRadius: 12, background: !msgText.trim() ? 'var(--surface-3)' : 'var(--accent)', border: 'none', color: 'var(--strong-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+            <Send size={16} />
+          </button>
+        </form>
       </div>
     </div>
   );

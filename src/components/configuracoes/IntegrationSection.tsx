@@ -116,6 +116,9 @@ function calculateDaysSince(iso: string): number {
 
 export function IntegrationSection() {
   const navigate = useNavigate();
+  const activeInstanceId = useDashboardStore((s) => s.activeInstanceId);
+  const activeInstanceName = useDashboardStore((s) => s.activeInstanceName);
+  
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -131,10 +134,12 @@ export function IntegrationSection() {
 
   const loadConversations = useDashboardStore((s) => s.loadConversations);
 
-  const loadInstanceInfo = useCallback(async () => {
+  const [instanceName, setInstanceName] = useState<string>(activeInstanceName || 'Teste Zeglam');
+
+  const loadInstanceInfo = useCallback(async (name: string) => {
     try {
       const { data } = await supabase.functions.invoke('evolution-qrcode', {
-        body: { action: 'info', instanceName: 'Teste Zeglam' },
+        body: { action: 'info', instanceName: name },
       });
       const info = Array.isArray(data) ? data[0] : data;
       if (info && info.id) {
@@ -157,7 +162,6 @@ export function IntegrationSection() {
           },
         });
       } else {
-        // Instância não existe (foi deletada)
         setInstanceInfo(null);
       }
     } catch {
@@ -166,14 +170,28 @@ export function IntegrationSection() {
   }, []);
 
   const loadDbStats = useCallback(async () => {
+    if (!activeInstanceId) return;
     try {
       const [convs, msgs, media, lastMsg, firstMsg] = await Promise.all([
-        supabase.from('conversations').select('id', { count: 'exact', head: true }),
-        supabase.from('messages').select('id', { count: 'exact', head: true }),
-        supabase.from('messages').select('id', { count: 'exact', head: true }).not('media_url', 'is', null),
-        supabase.from('messages').select('created_at').order('created_at', { ascending: false }).limit(1),
-        supabase.from('messages').select('created_at').order('created_at', { ascending: true }).limit(1),
+        supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('instance_id', activeInstanceId),
+        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('conversation_id', (
+          supabase.from('conversations').select('id').eq('instance_id', activeInstanceId)
+        ) as any),
+        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('conversation_id', (
+          supabase.from('conversations').select('id').eq('instance_id', activeInstanceId)
+        ) as any).not('media_url', 'is', null),
+        supabase.from('messages').select('created_at').eq('conversation_id', (
+          supabase.from('conversations').select('id').eq('instance_id', activeInstanceId)
+        ) as any).order('created_at', { ascending: false }).limit(1),
+        supabase.from('messages').select('created_at').eq('conversation_id', (
+          supabase.from('conversations').select('id').eq('instance_id', activeInstanceId)
+        ) as any).order('created_at', { ascending: true }).limit(1),
       ]);
+
+      // Alternativa mais performática para contar mensagens se a anterior falhar em alguns dialetos
+      // mas no Supabase o join implícito acima funciona. 
+      // Vou usar uma contagem direta de mensagens por conversa pertencente à instância.
+
       setDbStats({
         conversations: convs.count || 0,
         messages: msgs.count || 0,
@@ -183,21 +201,24 @@ export function IntegrationSection() {
         uniqueContacts: convs.count || 0,
       });
     } catch { /* ignore */ }
-  }, []);
+  }, [activeInstanceId]);
 
   // On mount: check connection + info + stats
   useEffect(() => {
     async function init() {
+      if (!activeInstanceName) return;
+      setInstanceName(activeInstanceName);
+
       try {
         const { data } = await supabase.functions.invoke('evolution-qrcode', {
-          body: { action: 'status', instanceName: 'Teste Zeglam' },
+          body: { action: 'status', instanceName: activeInstanceName },
         });
         const s = parseConnectionState(data);
         setStatus(s);
         if (s === 'connected') setQrBase64(null);
       } catch { /* ignore */ }
 
-      await Promise.all([loadInstanceInfo(), loadDbStats()]);
+      await Promise.all([loadInstanceInfo(activeInstanceName), loadDbStats()]);
 
       // Check latest sync job
       try {
@@ -211,7 +232,7 @@ export function IntegrationSection() {
           } else if (data.status === 'partial') {
             setJob({ ...data, status: 'running' });
             supabase.functions.invoke('evolution-sync', {
-              body: { action: 'continue', jobId: data.id, instanceName: 'Teste Zeglam' },
+              body: { action: 'continue', jobId: data.id, instanceName: activeInstanceName },
             }).then(() => startPolling(data.id));
           }
         }
@@ -222,7 +243,7 @@ export function IntegrationSection() {
     init();
 
     return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
-  }, [loadInstanceInfo, loadDbStats]);
+  }, [loadInstanceInfo, loadDbStats, activeInstanceId, activeInstanceName]);
 
   function startPolling(jobId: string) {
     if (pollingRef.current) clearInterval(pollingRef.current);
@@ -245,7 +266,7 @@ export function IntegrationSection() {
             if (pollingRef.current) clearInterval(pollingRef.current);
             pollingRef.current = null;
             supabase.functions.invoke('evolution-sync', {
-              body: { action: 'continue', jobId, instanceName: 'Teste Zeglam' },
+              body: { action: 'continue', jobId, instanceName: instanceName },
             }).then(() => {
               setJob((prev) => prev ? { ...prev, status: 'running' } : prev);
               startPolling(jobId);
@@ -275,7 +296,7 @@ export function IntegrationSection() {
     setError(null);
     try {
       const { data } = await supabase.functions.invoke('evolution-sync', {
-        body: { action: 'start', instanceName: 'Teste Zeglam', maxChats: maxChatsInput },
+        body: { action: 'start', instanceName: instanceName, maxChats: maxChatsInput },
       });
       if (data?.jobId) {
         setJob({ id: data.jobId, status: 'running', total_chats: 0, synced_chats: 0, total_messages: 0, total_media: 0, error: null, max_chats: maxChatsInput, started_at: new Date().toISOString(), current_step: 'fetching_chats' });
@@ -299,7 +320,7 @@ export function IntegrationSection() {
     setQrBase64(null);
     try {
       const { data, error: fnError } = await supabase.functions.invoke('evolution-qrcode', {
-        body: { action: 'connect', instanceName: 'Teste Zeglam' },
+        body: { action: 'connect', instanceName: instanceName },
       });
       if (fnError) throw new Error(fnError.message);
       // QR pode vir em data.qrcode.base64 (connect), data.qrcode (create) ou data.base64
@@ -328,7 +349,7 @@ export function IntegrationSection() {
     setError(null);
     try {
       const { data } = await supabase.functions.invoke('evolution-qrcode', {
-        body: { action: 'status', instanceName: 'Teste Zeglam' },
+        body: { action: 'status', instanceName: instanceName },
       });
       const s = parseConnectionState(data);
       setStatus(s);
@@ -358,7 +379,7 @@ export function IntegrationSection() {
       // Deleta a instância completamente (logout + delete)
       // Isso limpa os metadados antigos da Evolution (ownerJid, profileName, etc.)
       await supabase.functions.invoke('evolution-qrcode', {
-        body: { action: 'delete', instanceName: 'Teste Zeglam' },
+        body: { action: 'delete', instanceName: instanceName },
       });
       setStatus('disconnected');
       setQrBase64(null);

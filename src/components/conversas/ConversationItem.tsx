@@ -1,6 +1,7 @@
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Users } from 'lucide-react';
+import { useDashboardStore } from '@/lib/store';
 import type { Conversation, ConversationStatus } from '@/lib/mock-data';
 
 const statusConfig: Record<ConversationStatus, { color: string; label: string }> = {
@@ -23,9 +24,22 @@ function pickGradient(name: string) {
   return avatarGradients[Math.abs(h) % avatarGradients.length];
 }
 
+function formatPhone(phone: string) {
+  if (!phone) return 'Desconhecido';
+  const clean = phone.replace(/\D/g, '');
+  if (clean.length >= 12) {
+    return `+${clean.slice(0, 2)} (${clean.slice(2, 4)}) ${clean.slice(4, 9)}-${clean.slice(9)}`;
+  }
+  return phone;
+}
+
 export function ConversationItem({ conversation: c, isActive, onClick }: { conversation: Conversation; isActive: boolean; onClick: () => void }) {
   const last = c.messages[c.messages.length - 1];
   const st = statusConfig[c.status];
+
+  // Identificação inteligente: se o nome for numérico ou curto demais, usa o telefone formatado
+  const isNumeric = /^\d+$/.test(c.customerName || '');
+  const displayName = (isNumeric || !c.customerName) ? formatPhone(c.customerPhone) : c.customerName;
 
   return (
     <div
@@ -37,138 +51,122 @@ export function ConversationItem({ conversation: c, isActive, onClick }: { conve
         flexDirection: 'row',
         alignItems: 'flex-start',
         gap: 12,
-        padding: 12,
-        borderRadius: 12,
+        padding: '12px 14px',
+        borderRadius: 14,
         cursor: 'pointer',
-        background: isActive ? 'var(--hover)' : 'transparent',
-        borderLeft: isActive ? '3px solid var(--accent)' : '3px solid transparent',
-        transition: 'background 0.15s ease',
+        marginBottom: 4,
+        background: isActive ? 'var(--glass-strong)' : 'transparent',
+        border: isActive ? '1px solid var(--accent)' : '1px solid transparent',
+        boxShadow: isActive ? '0 8px 24px rgba(212, 175, 55, 0.15)' : 'none',
+        transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+        position: 'relative',
+        overflow: 'hidden',
       }}
-      onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--glass-strong)'; }}
+      onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--surface-2)'; }}
       onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
     >
+      {/* Indicador Lateral de Seleção */}
+      {isActive && (
+        <div style={{
+          position: 'absolute', left: 0, top: 0, bottom: 0, width: 4,
+          background: 'var(--accent)', boxShadow: '0 0 12px var(--accent)'
+        }} />
+      )}
+
       {/* Avatar */}
-      {c.profilePicUrl ? (
-        <img
-          src={c.profilePicUrl}
-          alt={c.customerName}
-          style={{
-            width: 40, minWidth: 40, height: 40, borderRadius: 20,
-            objectFit: 'cover', flexShrink: 0,
-          }}
-          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty('display'); }}
-        />
-      ) : null}
-      <div style={{
-        width: 40, minWidth: 40, height: 40, borderRadius: 20,
-        background: c.isGroup ? 'linear-gradient(135deg,#0ea5e9,#06b6d4)' : pickGradient(c.customerName),
-        display: c.profilePicUrl ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 15, fontWeight: 700, color: 'var(--strong-text)',
-        flexShrink: 0,
-      }}>
-        {c.isGroup ? <Users size={18} color="#fff" /> : c.customerName[0]?.toUpperCase()}
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        {c.profilePicUrl ? (
+          <img
+            src={c.profilePicUrl}
+            alt={displayName}
+            style={{
+              width: 44, height: 44, borderRadius: 22,
+              objectFit: 'cover', border: isActive ? '2px solid var(--accent)' : '2px solid transparent'
+            }}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty('display'); }}
+          />
+        ) : null}
+        <div style={{
+          width: 44, height: 44, borderRadius: 22,
+          background: c.isGroup ? 'linear-gradient(135deg,#0ea5e9,#06b6d4)' : pickGradient(displayName),
+          display: c.profilePicUrl ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 16, fontWeight: 700, color: '#fff',
+          border: isActive ? '2px solid var(--accent)' : '2px solid transparent'
+        }}>
+          {c.isGroup ? <Users size={20} /> : displayName[0]?.toUpperCase()}
+        </div>
+        
+        {/* Badge de Status Online/IA na Foto */}
+        <div style={{
+          position: 'absolute', bottom: 0, right: 0, width: 14, height: 14,
+          borderRadius: 7, border: '2px solid var(--surface)',
+          background: st.color, boxShadow: '0 0 8px ' + st.color
+        }} />
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
         {/* Row 1: Name + Status + Time */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-            <span className="truncate" style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)' }}>{c.customerName}</span>
+            <span className="truncate" style={{ 
+              fontSize: 14, fontWeight: 700, 
+              color: isActive ? 'var(--accent)' : 'var(--strong-text)',
+              letterSpacing: '-0.01em'
+            }}>
+              {displayName}
+            </span>
 
             {/* Group badge */}
             {c.isGroup && (
               <span style={{
                 fontSize: 9, padding: '1px 5px', borderRadius: 4,
                 background: 'rgba(14,165,233,0.15)', color: '#38bdf8', fontWeight: 700,
-                flexShrink: 0, letterSpacing: '0.02em',
               }}>GRUPO</span>
             )}
-
-            {/* Type Status: P (Pessoal) or N (Negócio) — only for individual chats */}
-            {!c.isGroup && c.conversationType === 'personal' && (
-              <span style={{
-                fontSize: 9, padding: '1px 5px', borderRadius: 4,
-                background: 'rgba(139,92,246,0.15)', color: '#a78bfa', fontWeight: 900,
-                flexShrink: 0
-              }}>P</span>
-            )}
-            {!c.isGroup && c.conversationType === 'business' && (
-              <span style={{
-                fontSize: 9, padding: '1px 5px', borderRadius: 4,
-                background: 'rgba(16,185,129,0.15)', color: 'var(--emerald-light)', fontWeight: 900,
-                flexShrink: 0
-              }}>N</span>
-            )}
-
-            {/* Interest Tags */}
-            {c.aiAnalysis?.interesse_produtos?.slice(0, 1).map((p: string) => (
-              <span key={p} style={{ 
-                fontSize: 9, padding: '1px 6px', borderRadius: 4, 
-                background: 'rgba(212,175,55,0.12)', color: '#d4af37', fontWeight: 600,
-                flexShrink: 0, border: '1px solid rgba(212,175,55,0.2)'
-              }}>{p}</span>
-            ))}
-            {/* New badge */}
-            {c.messages.length < 3 && (
-              <span style={{
-                fontSize: 8, padding: '1px 4px', borderRadius: 3,
-                background: 'var(--accent)', color: '#fff', fontWeight: 800,
-                textTransform: 'uppercase', flexShrink: 0
-              }}>Novo</span>
-            )}
-            {/* Group candidate badges */}
-            {c.groupCandidateStatus === 'dados_coletados' && (
-              <span style={{
-                fontSize: 9, padding: '1px 6px', borderRadius: 4,
-                background: 'rgba(16,185,129,0.18)', color: 'var(--emerald-light)',
-                fontWeight: 800, flexShrink: 0, border: '1px solid rgba(16,185,129,0.35)',
-                letterSpacing: '0.02em', textTransform: 'uppercase',
-              }}>Adicionar ao grupo</span>
-            )}
-            {c.groupCandidateStatus === 'aguardando_dados' && (
-              <span style={{
-                fontSize: 9, padding: '1px 6px', borderRadius: 4,
-                background: 'rgba(251,191,36,0.15)', color: '#fbbf24',
-                fontWeight: 700, flexShrink: 0, border: '1px solid rgba(251,191,36,0.3)',
-              }}>Coletando</span>
-            )}
-            {c.groupCandidateStatus === 'adicionada' && (
-              <span style={{
-                fontSize: 9, padding: '1px 6px', borderRadius: 4,
-                background: 'rgba(148,163,184,0.1)', color: 'var(--fg-subtle)',
-                fontWeight: 700, flexShrink: 0, border: '1px solid var(--border)',
-              }}>No grupo</span>
-            )}
           </div>
-          <span style={{ fontSize: 11, color: 'var(--fg-subtle)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 10, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>
             {formatDistanceToNow(c.lastMessageAt, { addSuffix: false, locale: ptBR })}
           </span>
         </div>
 
         {/* Row 2: AI Summary or Last Message */}
-        {c.aiAnalysis?.resumo ? (
-          <p className="truncate" style={{ 
-            fontSize: 11, color: 'var(--accent)', marginTop: 3, 
-            fontWeight: 500, fontStyle: 'italic', opacity: 0.9 
-          }}>
-            {c.aiAnalysis.resumo}
-          </p>
-        ) : (
-          <p className="truncate" style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 3 }}>{last?.content}</p>
-        )}
+        <div style={{ marginTop: 2 }}>
+          {c.aiAnalysis?.resumo ? (
+            <p className="truncate" style={{ 
+              fontSize: 12, color: 'var(--accent)', 
+              fontWeight: 500, fontStyle: 'italic', opacity: 0.9 
+            }}>
+              ✨ {c.aiAnalysis.resumo}
+            </p>
+          ) : (
+            <p className="truncate" style={{ 
+              fontSize: 12, color: 'var(--fg-muted)', 
+              opacity: isActive ? 1 : 0.7 
+            }}>
+              {last ? (
+                <>
+                  {last.author === 'humano' || last.author === 'atendente' ? 'Você: ' : ''}
+                  {last.content}
+                </>
+              ) : (
+                <span style={{ color: 'var(--fg-faint)', fontStyle: 'italic' }}>Nenhuma mensagem ainda</span>
+              )}
+            </p>
+          )}
+        </div>
 
         {/* Row 3: Status indicators */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 6, height: 6, borderRadius: 3, background: st.color, display: 'inline-block' }} />
-            <span style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>{st.label}</span>
+            <span style={{ fontSize: 10, color: isActive ? 'var(--fg-muted)' : 'var(--fg-subtle)', fontWeight: 500 }}>{st.label}</span>
           </div>
           {c.unreadCount > 0 && (
             <span style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9,
-              background: 'var(--accent)', fontSize: 10, fontWeight: 700, color: '#fff',
+              background: 'var(--accent)', fontSize: 10, fontWeight: 800, color: '#fff',
+              boxShadow: '0 4px 10px rgba(212, 175, 55, 0.3)'
             }}>{c.unreadCount}</span>
           )}
         </div>

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Search, MessageCircle, Users, ArrowUpDown } from 'lucide-react';
+import { Search, MessageCircle, Users, ArrowUpDown, CheckCheck, Loader } from 'lucide-react';
 import { useDashboardStore } from '@/lib/store';
 import type { ConversationStatus } from '@/lib/mock-data';
 import { ConversationItem } from './ConversationItem';
@@ -40,10 +40,12 @@ export function ConversationList() {
   const selectConversation = useDashboardStore((s) => s.selectConversation);
   const setFilter = useDashboardStore((s) => s.setFilter);
   const setSearchQuery = useDashboardStore((s) => s.setSearchQuery);
+  const markAllAsRead = useDashboardStore((s) => s.markAllAsRead);
 
   const [activeTab, setActiveTab] = useState<TabKind>('individuais');
   const [sortBy, setSortBy] = useState<SortKind>('recent');
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const [markingRead, setMarkingRead] = useState(false);
 
   // Contadores por tipo (respeitam search mas não o filter)
   const { individualCount, groupCount } = useMemo(() => {
@@ -134,8 +136,9 @@ export function ConversationList() {
     }}>
       {/* Tabs (Conversas / Grupos) */}
       <div style={{
-        display: 'flex', padding: '12px 16px 0', gap: 4,
+        display: 'flex', height: 72, padding: '0 16px', gap: 4,
         borderBottom: '1px solid var(--border)',
+        alignItems: 'flex-end', // Alinha as abas com a borda inferior
       }}>
         {tabs.map((t) => {
           const active = activeTab === t.value;
@@ -176,21 +179,41 @@ export function ConversationList() {
 
       {/* Search + Filters */}
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ position: 'relative' }}>
-          <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-subtle)' }} />
-          <input
-            type="text"
-            placeholder={activeTab === 'grupos' ? 'Buscar grupos...' : 'Buscar conversas...'}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: '100%', height: 36, paddingLeft: 36, paddingRight: 16, borderRadius: 12,
-              background: 'var(--glass)', border: '1px solid var(--border)',
-              fontSize: 13, color: 'var(--fg-dim)', outline: 'none',
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-subtle)' }} />
+            <input
+              type="text"
+              placeholder={activeTab === 'grupos' ? 'Buscar grupos...' : 'Buscar conversas...'}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%', height: 38, paddingLeft: 36, paddingRight: 16, borderRadius: 12,
+                background: 'var(--glass)', border: '1px solid var(--border)',
+                fontSize: 13, color: 'var(--fg-dim)', outline: 'none',
+              }}
+            />
+          </div>
+          <button
+            onClick={async () => {
+              setMarkingRead(true);
+              await markAllAsRead();
+              setMarkingRead(false);
             }}
-          />
+            title="Marcar todas como lidas"
+            disabled={markingRead}
+            style={{
+              width: 38, height: 38, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--glass)', border: '1px solid var(--border)', cursor: markingRead ? 'wait' : 'pointer',
+              color: 'var(--fg-muted)', transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--fg-muted)')}
+          >
+            {markingRead ? <Loader size={18} className="spin" /> : <CheckCheck size={18} />}
+          </button>
         </div>
-        <div className="scrollbar-none" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
           {filters.map((f) => {
             const active = filter === f.value;
             return (
@@ -198,13 +221,30 @@ export function ConversationList() {
                 key={f.value}
                 onClick={() => setFilter(f.value)}
                 style={{
-                  flexShrink: 0, padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
-                  fontSize: 11, fontWeight: 500, transition: 'all 0.2s',
-                  color: active ? 'var(--accent)' : 'var(--fg-muted)',
-                  background: active ? 'var(--accent-bg)' : 'var(--glass)',
-                  border: active ? '1px solid var(--accent-border)' : '1px solid var(--border)',
+                  padding: '7px 14px', borderRadius: 20, cursor: 'pointer',
+                  fontSize: 11, fontWeight: 600, transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                  color: active ? '#fff' : 'var(--fg-muted)',
+                  background: active ? 'var(--accent)' : 'var(--glass-strong)',
+                  border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
+                  boxShadow: active ? '0 4px 12px rgba(212, 175, 55, 0.25)' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+                onMouseEnter={(e) => {
+                  if (!active) {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'var(--surface-3)';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-muted)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-strong)';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)';
+                  }
                 }}
               >
+                {active && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />}
                 {f.label}
               </button>
             );

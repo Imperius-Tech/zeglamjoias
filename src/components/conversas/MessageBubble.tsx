@@ -57,7 +57,19 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
   const isAI = m.sentBy === 'ai';
   const isDraft = m.isDraft;
   const isSticker = m.mediaType === 'sticker';
-  const isMediaOnly = ['[midia]', '[sticker]', '[audio]', '[video]', '[mensagem]'].includes(m.content);
+  
+  const contentLower = (m.content || '').toLowerCase();
+  const isMediaOnly = [
+    '[midia]', '[mídia]', '[sticker]', '[audio]', '[áudio]', '[video]', '[vídeo]', '[mensagem]'
+  ].includes(contentLower);
+
+  const isVideo = m.mediaType === 'video' || 
+                 (m.mediaUrl && /\.(mp4|mov|webm|ogg|avi)$/i.test(m.mediaUrl));
+  const isAudio = m.mediaType === 'audio' || 
+                 (m.mediaUrl && /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(m.mediaUrl)) ||
+                 contentLower === '[audio]' || contentLower === '[áudio]';
+  const isImage = m.mediaType === 'image' || 
+                 (m.mediaUrl && /\.(jpg|jpeg|png|gif|webp)$/i.test(m.mediaUrl));
 
   const contextMenu = (
     <div ref={menuRef} style={{ position: 'relative', display: 'inline-flex' }}>
@@ -168,31 +180,39 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
             border: isClient ? 'none' : `1px ${isDraft ? 'dashed' : 'solid'} ${isAI ? 'var(--accent-border)' : 'rgba(16,185,129,0.2)'}`,
             opacity: isDraft ? 0.7 : 1,
           }}>
-            {quotedPreview}
-            {m.mediaUrl && m.mediaType === 'image' && (
+            {/* Imagem / Sticker */}
+            {m.mediaUrl && (isImage || isSticker) && (
               <div style={{ marginBottom: !isMediaOnly ? 8 : 0 }}>
                 <a href={m.mediaUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'block' }}>
-                  <img src={m.mediaUrl} alt="Imagem" style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8 }} />
+                  <img src={m.mediaUrl} alt="Mídia" style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 8, display: 'block' }} />
                 </a>
-                {m.mediaAnalysis && (
-                  <div style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    marginTop: 6, padding: '3px 8px', borderRadius: 6,
-                    background: m.mediaAnalysis.is_payment_proof ? 'rgba(16,185,129,0.12)' : 'var(--glass)',
-                    border: `1px solid ${m.mediaAnalysis.is_payment_proof ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`,
-                  }}>
-                    {m.mediaAnalysis.is_payment_proof ? <CreditCard size={10} style={{ color: 'var(--emerald)' }} /> : <Image size={10} style={{ color: 'var(--fg-subtle)' }} />}
-                    <span style={{ fontSize: 9, fontWeight: 600, color: m.mediaAnalysis.is_payment_proof ? 'var(--emerald-light)' : 'var(--fg-subtle)' }}>
-                      {m.mediaAnalysis.is_payment_proof ? 'Comprovante' : m.mediaAnalysis.description || m.mediaAnalysis.type || 'Imagem'}
-                    </span>
-                    {m.mediaAnalysis.payment_value && (
-                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--emerald-light)' }}> · {m.mediaAnalysis.payment_value}</span>
-                    )}
-                  </div>
-                )}
               </div>
             )}
-            {m.mediaUrl && m.mediaType === 'document' && (
+
+            {/* Vídeo */}
+            {m.mediaUrl && isVideo && (
+              <div style={{ marginBottom: !isMediaOnly ? 8 : 0, width: '100%', minWidth: 240 }}>
+                <video 
+                  src={m.mediaUrl} 
+                  controls 
+                  style={{ width: '100%', maxHeight: 300, borderRadius: 8, background: '#000' }}
+                />
+              </div>
+            )}
+
+            {/* Áudio */}
+            {m.mediaUrl && isAudio && (
+              <div style={{ marginBottom: !isMediaOnly ? 8 : 0, minWidth: 240 }}>
+                <audio 
+                  src={m.mediaUrl} 
+                  controls 
+                  style={{ width: '100%', height: 40 }}
+                />
+              </div>
+            )}
+
+            {/* Documento (Se não for vídeo/áudio/imagem já tratado) */}
+            {m.mediaUrl && m.mediaType === 'document' && !isVideo && !isAudio && !isImage && (
               <div style={{ marginBottom: !isMediaOnly ? 8 : 0 }}>
                 <a href={m.mediaUrl} target="_blank" rel="noopener noreferrer"
                   style={{
@@ -202,24 +222,33 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
                   }}
                 >
                   <FileText size={18} style={{ color: 'var(--fg-subtle)', flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: 'var(--fg-dim)' }}>Documento</span>
+                  <span style={{ fontSize: 12, color: 'var(--fg-dim)' }}>{m.content.length > 20 ? 'Documento' : m.content}</span>
                 </a>
-                {m.mediaAnalysis && m.mediaAnalysis.is_payment_proof && (
-                  <div style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    marginTop: 6, padding: '3px 8px', borderRadius: 6,
-                    background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)',
-                  }}>
-                    <CreditCard size={10} style={{ color: 'var(--emerald)' }} />
-                    <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--emerald-light)' }}>Comprovante</span>
-                  </div>
+              </div>
+            )}
+
+            {/* Análise de Mídia (Comprovantes, etc) */}
+            {m.mediaUrl && m.mediaAnalysis && (
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                marginBottom: 8, padding: '3px 8px', borderRadius: 6,
+                background: m.mediaAnalysis.is_payment_proof ? 'rgba(16,185,129,0.12)' : 'var(--glass)',
+                border: `1px solid ${m.mediaAnalysis.is_payment_proof ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`,
+              }}>
+                {m.mediaAnalysis.is_payment_proof ? <CreditCard size={10} style={{ color: 'var(--emerald)' }} /> : <Image size={10} style={{ color: 'var(--fg-subtle)' }} />}
+                <span style={{ fontSize: 9, fontWeight: 600, color: m.mediaAnalysis.is_payment_proof ? 'var(--emerald-light)' : 'var(--fg-subtle)' }}>
+                  {m.mediaAnalysis.is_payment_proof ? 'Comprovante' : m.mediaAnalysis.description || m.mediaAnalysis.type || 'Análise de Mídia'}
+                </span>
+                {m.mediaAnalysis.payment_value && (
+                  <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--emerald-light)' }}> · {m.mediaAnalysis.payment_value}</span>
                 )}
               </div>
             )}
+
             {!isMediaOnly && m.content && m.content}
             {isMediaOnly && !m.mediaUrl && (
               <span style={{ fontStyle: 'italic', color: 'var(--fg-muted)', fontSize: 13 }}>
-                {m.content === '[audio]' ? '🎵 Mensagem de áudio' : m.content === '[sticker]' ? '✨ Figurinha' : '📎 Arquivo de mídia'}
+                {isAudio ? '🎵 Mensagem de áudio' : isVideo ? '🎥 Vídeo' : '📎 Arquivo de mídia (carregando...)'}
               </span>
             )}
           </div>

@@ -115,7 +115,20 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
               >
                 <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--strong-text)' }}>Notificações</h3>
-                  {notificationsCount > 0 && <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, background: 'var(--accent-bg)', color: 'var(--accent)', fontWeight: 600 }}>{notificationsCount} novas</span>}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    {notificationsCount > 0 && (
+                      <button 
+                        onClick={() => {
+                          const markAllAsRead = useDashboardStore.getState().markAllAsRead;
+                          markAllAsRead();
+                        }}
+                        style={{ fontSize: 11, background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                      >
+                        Limpar tudo
+                      </button>
+                    )}
+                    {notificationsCount > 0 && <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, background: 'var(--accent-bg)', color: 'var(--accent)', fontWeight: 600 }}>{notificationsCount}</span>}
+                  </div>
                 </div>
                 
                 <div style={{ maxHeight: 360, overflowY: 'auto' }}>

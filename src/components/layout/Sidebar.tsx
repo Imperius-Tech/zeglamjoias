@@ -4,15 +4,35 @@ import { MessageSquare, BookOpen, FileCheck, BarChart3, Settings, X, Users, Zap,
 import { useDashboardStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 
-const navItems = [
-  { href: '/conversas', label: 'Conversas', icon: MessageSquare, badge: true },
-  { href: '/clientes', label: 'Clientes', icon: Users },
-  { href: '/conhecimento', label: 'Base de Conhecimento', icon: BookOpen },
-  { href: '/treinamento', label: 'Treinar IA', icon: GraduationCap },
-  { href: '/comprovantes', label: 'Comprovantes', icon: FileCheck },
-  { href: '/automacoes', label: 'Automações', icon: Zap },
-  { href: '/metricas', label: 'Métricas', icon: BarChart3 },
-  { href: '/configuracoes', label: 'Configurações', icon: Settings },
+const categories = [
+  {
+    label: 'PRINCIPAL',
+    items: [
+      { href: '/conversas', label: 'Conversas', icon: MessageSquare, badge: true },
+      { href: '/clientes', label: 'Clientes', icon: Users },
+    ]
+  },
+  {
+    label: 'CONTEÚDO & IA',
+    items: [
+      { href: '/conhecimento', label: 'Base de Conhecimento', icon: BookOpen },
+      { href: '/treinamento', label: 'Treinar IA', icon: GraduationCap },
+      { href: '/comprovantes', label: 'Comprovantes', icon: FileCheck },
+    ]
+  },
+  {
+    label: 'GESTÃO',
+    items: [
+      { href: '/automacoes', label: 'Automações', icon: Zap },
+      { href: '/metricas', label: 'Métricas', icon: BarChart3 },
+    ]
+  },
+  {
+    label: 'ADMINISTRAÇÃO',
+    items: [
+      { href: '/configuracoes', label: 'Configurações', icon: Settings },
+    ]
+  }
 ];
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -78,37 +98,43 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </div>
 
         {/* Nav */}
-        <nav style={{ flex: 1, padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {navItems.map((item) => {
-            const active = pathname === item.href || pathname.startsWith(item.href + '/');
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                to={item.href}
-                onClick={onClose}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 12,
-                  textDecoration: 'none', fontSize: 14, fontWeight: 500, transition: 'all 0.2s',
-                  color: active ? 'var(--strong-text)' : 'var(--fg-muted)',
-                  background: active ? 'var(--glass-strong)' : 'transparent',
-                  borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent',
-                }}
-              >
-                <Icon size={18} style={{ color: active ? 'var(--accent)' : undefined }} />
-                <span style={{ flex: 1 }}>{item.label}</span>
-                {item.badge && unreadTotal > 0 && (
-                  <span style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    minWidth: 20, height: 20, padding: '0 6px', borderRadius: 10,
-                    background: 'var(--accent)', fontSize: 10, fontWeight: 700, color: '#fff',
-                  }}>
-                    {unreadTotal}
-                  </span>
-                )}
-              </Link>
-            );
-          })}
+        <nav style={{ flex: 1, padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: 24, overflowY: 'auto' }}>
+          {categories.map((cat) => (
+            <div key={cat.label} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <h3 style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-faint)', letterSpacing: '0.1em', padding: '0 12px', marginBottom: 8 }}>
+                {cat.label}
+              </h3>
+              {cat.items.map((item) => {
+                const active = pathname === item.href || pathname.startsWith(item.href + '/');
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    to={item.href}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 12,
+                      textDecoration: 'none', fontSize: 14, fontWeight: active ? 600 : 500, transition: 'all 0.2s',
+                      color: active ? 'var(--strong-text)' : 'var(--fg-muted)',
+                      background: active ? 'var(--glass-strong)' : 'transparent',
+                      borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent',
+                    }}
+                  >
+                    <Icon size={18} style={{ color: active ? 'var(--accent)' : undefined }} />
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                    {item.badge && unreadTotal > 0 && (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        minWidth: 20, height: 20, padding: '0 6px', borderRadius: 10,
+                        background: 'var(--accent)', fontSize: 10, fontWeight: 700, color: '#fff',
+                      }}>
+                        {unreadTotal}
+                      </span>
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         {/* User card */}

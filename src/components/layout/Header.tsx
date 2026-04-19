@@ -61,7 +61,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
     >
       {/* Left */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <button onClick={onMenuClick} className="hide-desktop" style={{ padding: 8, borderRadius: 8, background: 'none', border: 'none', color: 'var(--fg-muted)', cursor: 'pointer' }}>
+        <button onClick={onMenuClick} style={{ padding: 8, borderRadius: 8, background: 'none', border: 'none', color: 'var(--fg-muted)', cursor: 'pointer' }}>
           <Menu size={20} />
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>

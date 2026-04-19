@@ -29,7 +29,7 @@
   --glass-strong: rgba(255,255,255,0.06);
   --hover: rgba(212, 175, 55, 0.08);
   --page-bg: radial-gradient(circle at top center, #161821 0%, #07080a 100%);
-  --header-bg: rgba(9, 9, 11, 0.8);
+  --header-bg: rgba(22, 24, 33, 0.4);
   --sidebar-bg: #09090b;
   --panel-bg: #14161c;
   --strong-text: #ffffff;
@@ -168,11 +168,13 @@ input::placeholder, textarea::placeholder {
 }
 @media (min-width: 1024px) {
   .hide-desktop { display: none !important; }
-  .sidebar-fixed {
-    transform: translateX(0) !important;
-  }
   .main-with-sidebar {
-    margin-left: 260px !important;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    width: 100%;
+  }
+  .sidebar-open .main-with-sidebar {
+    margin-left: 260px;
+    width: calc(100% - 260px);
   }
 }
 @media (min-width: 768px) {

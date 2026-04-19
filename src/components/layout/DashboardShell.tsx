@@ -4,13 +4,13 @@ import { Header } from './Header';
 import { SandboxBanner } from './SandboxBanner';
 
 export function DashboardShell({ children }: { children: ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   return (
-    <div style={{ height: '100vh', overflow: 'hidden', background: 'transparent' }}>
+    <div className={sidebarOpen ? 'sidebar-open' : ''} style={{ height: '100vh', overflow: 'hidden', background: 'transparent' }}>
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="main-with-sidebar" style={{ marginLeft: 0, height: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <Header onMenuClick={() => setSidebarOpen(true)} />
+      <div className="main-with-sidebar" style={{ height: '100vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
         <SandboxBanner />
         <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           <div style={{

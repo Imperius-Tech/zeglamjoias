@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { SandboxBanner } from './SandboxBanner';
 
 export function DashboardShell({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -10,6 +11,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="main-with-sidebar" style={{ marginLeft: 0, height: '100vh', display: 'flex', flexDirection: 'column' }}>
         <Header onMenuClick={() => setSidebarOpen(true)} />
+        <SandboxBanner />
         <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           <div style={{
             pointerEvents: 'none', position: 'absolute', top: 0, right: 0,

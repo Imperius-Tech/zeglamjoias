@@ -50,24 +50,41 @@ export function ChatView() {
   useEffect(() => {
     if (!conv) return;
     if (conv.isGroup) return;
-    if (conv.unreadCount <= 0) return;
-    if (conv.groupCandidateStatus === 'aguardando_dados') return;
 
+    // Dispara sempre que a ULTIMA mensagem real for do cliente
     const realMessages = conv.messages.filter((m) => !m.isDraft);
     const last = realMessages[realMessages.length - 1];
     if (!last || last.author !== 'cliente') return;
 
-    const hasActiveSuggestions = conv.messages.some((m) => m.isDraft && m.suggestionGroupId);
-    if (hasActiveSuggestions) return;
-
-    const cacheKey = `auto-suggest-${last.id}`;
+    // Cache por msg + status atual (pra rodar de novo se status mudar via reset)
+    const cacheKey = `auto-process-${last.id}-${conv.groupCandidateStatus || 'null'}`;
     if (sessionStorage.getItem(cacheKey)) return;
     sessionStorage.setItem(cacheKey, '1');
 
-    supabase.functions.invoke('evolution-ai-reply', {
-      body: { conversationId: conv.id, mode: 'suggestions' },
-    }).catch((err) => console.error('[auto-suggest] failed:', err));
-  }, [selectedId, conv?.messages.length]);
+    // 1. Tenta extrair dados de candidato a grupo (intent + campos estruturados).
+    // Aguarda o resultado pra decidir se precisa gerar sugestao da IA.
+    supabase.functions.invoke('group-candidate-extract', {
+      body: { conversationId: conv.id },
+    }).then(({ data }) => {
+      // Se entrou no fluxo de cadastro (aguardando_dados OU dados_coletados),
+      // nao gera sugestao da IA porque o template/card vai aparecer.
+      const willShowTemplate = data?.status === 'aguardando_dados' || data?.status === 'dados_coletados';
+      const hasActiveSuggestions = conv.messages.some((m) => m.isDraft && m.suggestionGroupId);
+      if (willShowTemplate || hasActiveSuggestions) return;
+
+      supabase.functions.invoke('evolution-ai-reply', {
+        body: { conversationId: conv.id, mode: 'suggestions' },
+      }).catch((err) => console.error('[auto-suggest] failed:', err));
+    }).catch((err) => {
+      console.error('[group-extract] failed:', err);
+      // Fallback: gera sugestao normalmente se group-extract falhar
+      const hasActiveSuggestions = conv.messages.some((m) => m.isDraft && m.suggestionGroupId);
+      if (hasActiveSuggestions) return;
+      supabase.functions.invoke('evolution-ai-reply', {
+        body: { conversationId: conv.id, mode: 'suggestions' },
+      }).catch((e) => console.error('[auto-suggest] failed:', e));
+    });
+  }, [selectedId, conv?.messages.length, conv?.groupCandidateStatus]);
 
   if (!conv) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
@@ -121,6 +138,31 @@ export function ChatView() {
                   style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, background: conv.aiEnabled ? 'rgba(16,185,129,0.1)' : 'var(--glass)', border: `1px solid ${conv.aiEnabled ? 'rgba(16,185,129,0.3)' : 'var(--border)'}`, color: conv.aiEnabled ? 'var(--emerald-light)' : 'var(--fg-subtle)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
                 >
                   <Power size={12} /> {conv.aiEnabled ? 'IA Ativa' : 'IA Off'}
+                </button>
+                <button
+                  onClick={async () => {
+                    if (aiGenerating) return;
+                    setAiGenerating(true);
+                    try {
+                      await supabase.functions.invoke('evolution-ai-reply', { body: { conversationId: conv.id, mode: 'suggestions', force: true } });
+                    } finally {
+                      setAiGenerating(false);
+                    }
+                  }}
+                  disabled={aiGenerating}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '6px 12px', borderRadius: 8,
+                    background: 'linear-gradient(135deg, rgba(212,175,55,0.15), rgba(212,175,55,0.05))',
+                    border: '1px solid rgba(212,175,55,0.3)',
+                    color: 'var(--accent)', fontSize: 11, fontWeight: 600,
+                    cursor: aiGenerating ? 'wait' : 'pointer',
+                    opacity: aiGenerating ? 0.7 : 1,
+                  }}
+                  title="Gerar sugestões de resposta com IA"
+                >
+                  {aiGenerating ? <Loader size={12} className="spin" /> : <Bot size={12} />}
+                  {aiGenerating ? 'Gerando…' : 'Gerar IA'}
                 </button>
                 <button
                   onClick={async () => {
@@ -182,6 +224,12 @@ export function ChatView() {
       {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {conv.messagesLoaded === false && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '24px 0', color: 'var(--fg-subtle)', fontSize: 12 }}>
+              <Loader size={14} className="spin" />
+              <span>Carregando histórico…</span>
+            </div>
+          )}
           {conv.messages
             .filter((msg) => !msg.suggestionGroupId)
             .map((msg) => (
@@ -196,10 +244,78 @@ export function ChatView() {
         </div>
       </div>
 
+      {/* Template: entrada no grupo (mensagens separadas) */}
+      {(() => {
+        if (conv.groupCandidateStatus !== 'aguardando_dados') return null;
+
+        // Nao mostra se o Zevaldo ja comecou a responder (ultima msg nao-draft e humano/ia)
+        const realMessages = conv.messages.filter((m) => !m.isDraft);
+        const last = realMessages[realMessages.length - 1];
+        if (!last || last.author !== 'cliente') return null;
+
+        const templates = [
+          'Olá 😊',
+          'Tudo bem?',
+          'Solicito, por gentileza, o envio das seguintes informações:\n\n• Nome completo:\n• Nome da marca:\n• Cidade:\n• Galvânica utilizada:\n\nVocê já participa de algum Grupo de Compras Coletivas?\nSe sim, poderia informar o nome?\n\nApós o registro dos dados, realizarei sua inclusão no grupo.',
+          'Alguém indicou você?',
+        ];
+
+        const sendTemplate = async () => {
+          for (const text of templates) {
+            await supabase.functions.invoke('evolution-send', { body: { conversationId: conv.id, text } });
+            await new Promise((r) => setTimeout(r, 700));
+          }
+          await supabase.from('conversations').update({ status: 'aguardando_humano' }).eq('id', conv.id);
+        };
+
+        const dismissTemplate = () => {
+          sessionStorage.setItem(`dismiss-template-${conv.id}`, '1');
+          // Forca re-render ocultando
+          useDashboardStore.setState((state) => ({ conversations: [...state.conversations] }));
+        };
+
+        if (sessionStorage.getItem(`dismiss-template-${conv.id}`)) return null;
+
+        return (
+          <div style={{ borderTop: '1px solid rgba(251,191,36,0.3)', background: 'linear-gradient(to bottom, rgba(251,191,36,0.06), rgba(251,191,36,0.02))' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px 8px' }}>
+              <Sparkles size={14} style={{ color: '#fbbf24' }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                Template: Entrada no grupo ({templates.length} mensagens)
+              </span>
+              <button onClick={dismissTemplate} style={{ marginLeft: 'auto', padding: 4, background: 'none', border: 'none', color: 'var(--fg-subtle)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                <Trash2 size={12} /> Ocultar
+              </button>
+            </div>
+            <div style={{ padding: '0 20px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {templates.map((t, i) => (
+                <div key={i} style={{ padding: 10, borderRadius: 10, background: 'var(--glass)', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--fg-subtle)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Mensagem {i + 1}
+                  </div>
+                  <p style={{ fontSize: 12, color: 'var(--fg-dim)', lineHeight: 1.5, margin: 0, whiteSpace: 'pre-wrap' }}>{t}</p>
+                </div>
+              ))}
+              <button
+                onClick={sendTemplate}
+                style={{ padding: '10px 14px', borderRadius: 10, background: '#fbbf24', color: '#000', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', marginTop: 4 }}
+              >
+                Enviar as {templates.length} mensagens
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* AI Suggestions Panel */}
       {(() => {
         const suggestions = conv.messages.filter((m) => m.isDraft && m.suggestionGroupId);
         if (suggestions.length === 0) return null;
+        // Se template de entrada no grupo esta ativo, oculta sugestoes (template prevalece)
+        if (conv.groupCandidateStatus === 'aguardando_dados' && !sessionStorage.getItem(`dismiss-template-${conv.id}`)) {
+          const last = conv.messages.filter((m) => !m.isDraft).slice(-1)[0];
+          if (last && last.author === 'cliente') return null;
+        }
 
         const approveAndSend = async (chosen: Message) => {
           const allIds = suggestions.map((s) => s.id);

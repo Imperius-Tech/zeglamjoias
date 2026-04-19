@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Wifi, WifiOff, Loader, QrCode, CheckCircle, MessageSquare, ArrowRight,
   RefreshCw, LogOut, Phone, Calendar, Server, Zap, Users, Image as ImageIcon,
-  Database, Shield, Clock, Hash, Copy, Check, AlertTriangle, X,
+  Database, Shield, Clock, Hash, Copy, Check, AlertTriangle, X, Sparkles,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SectionTitle } from './SettingsField';
+import { GroupSelector } from './GroupSelector';
+import { PromotionsSection } from './PromotionsSection';
 import { supabase } from '@/lib/supabase';
 import { useDashboardStore } from '@/lib/store';
 
@@ -20,6 +22,7 @@ interface SyncJob {
   total_messages: number;
   total_media: number;
   error: string | null;
+  batch_offset?: number;
   max_chats?: number;
   started_at?: string | null;
   finished_at?: string | null;
@@ -55,6 +58,21 @@ interface DbStats {
   lastMessage: string | null;
   uniqueContacts: number;
   firstMessage: string | null;
+}
+
+interface AnalysisJob {
+  id: string;
+  instance_id: string;
+  status: 'pending' | 'running' | 'completed' | 'cancelled' | 'failed';
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  current_media_type: string | null;
+  cancel_requested: boolean;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 const statusConfig = {
@@ -118,6 +136,9 @@ export function IntegrationSection() {
   const navigate = useNavigate();
   const activeInstanceId = useDashboardStore((s) => s.activeInstanceId);
   const activeInstanceName = useDashboardStore((s) => s.activeInstanceName);
+  const instances = useDashboardStore((s) => s.instances);
+  const activeInstance = instances.find((i) => i.evolutionInstanceId === activeInstanceId);
+  const isProductionInstance = activeInstance && !activeInstance.isSandbox;
   
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [qrBase64, setQrBase64] = useState<string | null>(null);
@@ -130,7 +151,14 @@ export function IntegrationSection() {
   const [dbStats, setDbStats] = useState<DbStats | null>(null);
   const [copied, setCopied] = useState(false);
   const [showDisconnectModal, setShowDisconnectModal] = useState(false);
+  const [pendingMediaCount, setPendingMediaCount] = useState(0);
+  const [downloadingMedia, setDownloadingMedia] = useState(false);
+  const [mediaProgress, setMediaProgress] = useState({ downloaded: 0, failed: 0 });
+  const cancelDownloadRef = useRef(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [pendingAnalysisCount, setPendingAnalysisCount] = useState(0);
+  const [analysisJob, setAnalysisJob] = useState<AnalysisJob | null>(null);
+  const analysisLoopRef = useRef<boolean>(false);
 
   const loadConversations = useDashboardStore((s) => s.loadConversations);
 
@@ -172,42 +200,85 @@ export function IntegrationSection() {
   const loadDbStats = useCallback(async () => {
     if (!activeInstanceId) return;
     try {
-      const [convs, msgs, media, lastMsg, firstMsg] = await Promise.all([
-        supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('instance_id', activeInstanceId),
-        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('conversation_id', (
-          supabase.from('conversations').select('id').eq('instance_id', activeInstanceId)
-        ) as any),
-        supabase.from('messages').select('id', { count: 'exact', head: true }).eq('conversation_id', (
-          supabase.from('conversations').select('id').eq('instance_id', activeInstanceId)
-        ) as any).not('media_url', 'is', null),
-        supabase.from('messages').select('created_at').eq('conversation_id', (
-          supabase.from('conversations').select('id').eq('instance_id', activeInstanceId)
-        ) as any).order('created_at', { ascending: false }).limit(1),
-        supabase.from('messages').select('created_at').eq('conversation_id', (
-          supabase.from('conversations').select('id').eq('instance_id', activeInstanceId)
-        ) as any).order('created_at', { ascending: true }).limit(1),
+      // 1. Total conversations for this instance
+      const { count: convCount } = await supabase
+        .from('conversations')
+        .select('id', { count: 'exact', head: true })
+        .eq('instance_id', activeInstanceId);
+
+      // 2. All conversation IDs for this instance (paged to handle >1000)
+      const convIds: string[] = [];
+      const pageSize = 1000;
+      for (let from = 0; ; from += pageSize) {
+        const { data: page } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('instance_id', activeInstanceId)
+          .range(from, from + pageSize - 1);
+        if (!page || page.length === 0) break;
+        for (const row of page) convIds.push(row.id);
+        if (page.length < pageSize) break;
+      }
+
+      if (convIds.length === 0) {
+        setDbStats({ conversations: convCount || 0, messages: 0, media: 0, lastMessage: null, firstMessage: null, uniqueContacts: convCount || 0 });
+        return;
+      }
+
+      // 3. Messages counts + boundary dates via .in(conversation_id, convIds)
+      // Supabase limits URL length, so batch in chunks of 500 IDs if needed
+      async function countMessages(filter?: (q: any) => any): Promise<number> {
+        let total = 0;
+        for (let i = 0; i < convIds.length; i += 500) {
+          const chunk = convIds.slice(i, i + 500);
+          let q: any = supabase.from('messages').select('id', { count: 'exact', head: true }).in('conversation_id', chunk);
+          if (filter) q = filter(q);
+          const { count } = await q;
+          total += count || 0;
+        }
+        return total;
+      }
+
+      const [msgTotal, mediaTotal] = await Promise.all([
+        countMessages(),
+        countMessages((q) => q.not('media_url', 'is', null).neq('media_url', 'FAILED')),
       ]);
 
-      // Alternativa mais performática para contar mensagens se a anterior falhar em alguns dialetos
-      // mas no Supabase o join implícito acima funciona. 
-      // Vou usar uma contagem direta de mensagens por conversa pertencente à instância.
+      // 4. First and last message dates — query first chunk only (good enough for display)
+      const firstChunk = convIds.slice(0, 500);
+      const [{ data: lastData }, { data: firstData }] = await Promise.all([
+        supabase.from('messages').select('created_at').in('conversation_id', firstChunk).order('created_at', { ascending: false }).limit(1),
+        supabase.from('messages').select('created_at').in('conversation_id', firstChunk).order('created_at', { ascending: true }).limit(1),
+      ]);
 
       setDbStats({
-        conversations: convs.count || 0,
-        messages: msgs.count || 0,
-        media: media.count || 0,
-        lastMessage: lastMsg.data?.[0]?.created_at || null,
-        firstMessage: firstMsg.data?.[0]?.created_at || null,
-        uniqueContacts: convs.count || 0,
+        conversations: convCount || 0,
+        messages: msgTotal,
+        media: mediaTotal,
+        lastMessage: lastData?.[0]?.created_at || null,
+        firstMessage: firstData?.[0]?.created_at || null,
+        uniqueContacts: convCount || 0,
       });
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.error('loadDbStats error:', e);
+    }
   }, [activeInstanceId]);
 
-  // On mount: check connection + info + stats
+  // On mount/change of active instance: reset UI and re-check connection + info + stats + last sync job
   useEffect(() => {
     async function init() {
       if (!activeInstanceName) return;
+
+      // Reset UI state when switching instances
       setInstanceName(activeInstanceName);
+      setJob(null);
+      setInstanceInfo(null);
+      setDbStats(null);
+      setError(null);
+      setQrBase64(null);
+      setStatus('disconnected');
+      setChecking(true);
+      if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
 
       try {
         const { data } = await supabase.functions.invoke('evolution-qrcode', {
@@ -220,12 +291,12 @@ export function IntegrationSection() {
 
       await Promise.all([loadInstanceInfo(activeInstanceName), loadDbStats()]);
 
-      // Check latest sync job
+      // Check latest sync job FOR THIS INSTANCE (not global)
       try {
         const { data } = await supabase.functions.invoke('evolution-sync', {
-          body: { action: 'status' },
+          body: { action: 'status', instanceName: activeInstanceName },
         });
-        if (data && data.status !== 'none') {
+        if (data && data.status && data.status !== 'none') {
           setJob(data);
           if (data.status === 'running') {
             startPolling(data.id);
@@ -265,8 +336,9 @@ export function IntegrationSection() {
           } else if (data.status === 'partial') {
             if (pollingRef.current) clearInterval(pollingRef.current);
             pollingRef.current = null;
+            const contInstance = activeInstanceName || instanceName;
             supabase.functions.invoke('evolution-sync', {
-              body: { action: 'continue', jobId, instanceName: instanceName },
+              body: { action: 'continue', jobId, instanceName: contInstance },
             }).then(() => {
               setJob((prev) => prev ? { ...prev, status: 'running' } : prev);
               startPolling(jobId);
@@ -281,7 +353,7 @@ export function IntegrationSection() {
     let remaining = 1;
     while (remaining > 0) {
       try {
-        const { data } = await supabase.functions.invoke('evolution-media-download', { body: {} });
+        const { data } = await supabase.functions.invoke('evolution-media-download', { body: { instanceName } });
         if (!data) break;
         remaining = data.remaining || 0;
         if (data.downloaded > 0) {
@@ -292,11 +364,157 @@ export function IntegrationSection() {
     }
   }
 
+  const loadPendingMediaCount = useCallback(async () => {
+    if (!activeInstanceId) { setPendingMediaCount(0); return; }
+    const { data: convs } = await supabase.from('conversations').select('id').eq('instance_id', activeInstanceId);
+    if (!convs || convs.length === 0) { setPendingMediaCount(0); return; }
+    let total = 0;
+    const ids = convs.map((c) => c.id);
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const { count } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .in('conversation_id', chunk)
+        .not('media_type', 'is', null)
+        .or('media_url.is.null,media_url.like.%.bin');
+      total += count || 0;
+    }
+    setPendingMediaCount(total);
+  }, [activeInstanceId]);
+
+  useEffect(() => { loadPendingMediaCount(); }, [loadPendingMediaCount]);
+
+  const handleDownloadAllMedia = useCallback(async () => {
+    const targetInstance = activeInstanceName || instanceName;
+    if (!targetInstance) return;
+    cancelDownloadRef.current = false;
+    setDownloadingMedia(true);
+    setMediaProgress({ downloaded: 0, failed: 0 });
+    try {
+      let remaining = 1;
+      let safetyStop = 0;
+      while (remaining > 0 && safetyStop < 500 && !cancelDownloadRef.current) {
+        safetyStop++;
+        const { data } = await supabase.functions.invoke('evolution-media-download', { body: { instanceName: targetInstance } });
+        if (cancelDownloadRef.current) break;
+        if (!data) break;
+        remaining = data.remaining || 0;
+        setMediaProgress((prev) => ({
+          downloaded: prev.downloaded + (data.downloaded || 0),
+          failed: prev.failed + (data.failed || 0),
+        }));
+        setPendingMediaCount(remaining);
+        if ((data.downloaded || 0) === 0 && (data.failed || 0) === 0) break;
+      }
+    } finally {
+      cancelDownloadRef.current = false;
+      setDownloadingMedia(false);
+      loadDbStats();
+      loadPendingMediaCount();
+    }
+  }, [activeInstanceName, instanceName, loadDbStats, loadPendingMediaCount]);
+
+  const handleCancelDownload = useCallback(() => {
+    cancelDownloadRef.current = true;
+  }, []);
+
+  const loadPendingAnalysisCount = useCallback(async () => {
+    if (!activeInstanceId) { setPendingAnalysisCount(0); return; }
+    const { count } = await supabase
+      .from('messages')
+      .select('id, conversations!inner(instance_id)', { count: 'exact', head: true })
+      .eq('conversations.instance_id', activeInstanceId)
+      .is('media_analysis', null)
+      .not('media_url', 'is', null)
+      .neq('media_url', '')
+      .not('media_url', 'like', 'FAILED%')
+      .in('media_type', ['image', 'audio', 'document', 'sticker', 'video']);
+    setPendingAnalysisCount(count || 0);
+  }, [activeInstanceId]);
+
+  useEffect(() => { loadPendingAnalysisCount(); }, [loadPendingAnalysisCount]);
+
+  // Recupera job ativo ao montar/trocar de instância
+  useEffect(() => {
+    if (!activeInstanceId) { setAnalysisJob(null); return; }
+    (async () => {
+      const { data } = await supabase
+        .from('analysis_jobs')
+        .select('*')
+        .eq('instance_id', activeInstanceId)
+        .in('status', ['pending', 'running'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data) setAnalysisJob(data as AnalysisJob);
+      else setAnalysisJob(null);
+    })();
+  }, [activeInstanceId]);
+
+  const runAnalysisLoop = useCallback(async (jobId: string) => {
+    if (analysisLoopRef.current) return;
+    analysisLoopRef.current = true;
+    try {
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { data } = await supabase.functions.invoke('evolution-batch-analyze', {
+          body: { action: 'tick', jobId },
+        });
+        if (data?.job) setAnalysisJob(data.job as AnalysisJob);
+        if (data?.done) break;
+        // Pequena pausa entre batches pra aliviar rate limit Gemini
+        await new Promise((r) => setTimeout(r, 800));
+      }
+    } catch (err) {
+      console.error('analysis loop error:', err);
+    } finally {
+      analysisLoopRef.current = false;
+      loadPendingAnalysisCount();
+    }
+  }, [loadPendingAnalysisCount]);
+
+  const handleStartAnalysis = useCallback(async () => {
+    if (!activeInstanceId) return;
+    try {
+      const { data } = await supabase.functions.invoke('evolution-batch-analyze', {
+        body: { action: 'start', instanceId: activeInstanceId },
+      });
+      if (data?.job) {
+        setAnalysisJob(data.job as AnalysisJob);
+        if (data.job.status === 'running') runAnalysisLoop(data.job.id);
+      }
+    } catch (err: any) {
+      console.error('start analysis error:', err);
+    }
+  }, [activeInstanceId, runAnalysisLoop]);
+
+  const handleCancelAnalysis = useCallback(async () => {
+    if (!analysisJob?.id) return;
+    try {
+      await supabase.functions.invoke('evolution-batch-analyze', {
+        body: { action: 'cancel', jobId: analysisJob.id },
+      });
+    } catch {}
+  }, [analysisJob?.id]);
+
+  // Retoma loop se havia um job running ao montar
+  useEffect(() => {
+    if (analysisJob?.status === 'running' && !analysisLoopRef.current) {
+      runAnalysisLoop(analysisJob.id);
+    }
+  }, [analysisJob?.id, analysisJob?.status, runAnalysisLoop]);
+
   const handleStartSync = useCallback(async () => {
     setError(null);
+    const targetInstance = activeInstanceName || instanceName;
+    if (!targetInstance) {
+      setError('Nenhuma instância ativa.');
+      return;
+    }
     try {
       const { data } = await supabase.functions.invoke('evolution-sync', {
-        body: { action: 'start', instanceName: instanceName, maxChats: maxChatsInput },
+        body: { action: 'start', instanceName: targetInstance, maxChats: maxChatsInput },
       });
       if (data?.jobId) {
         setJob({ id: data.jobId, status: 'running', total_chats: 0, synced_chats: 0, total_messages: 0, total_media: 0, error: null, max_chats: maxChatsInput, started_at: new Date().toISOString(), current_step: 'fetching_chats' });
@@ -305,7 +523,7 @@ export function IntegrationSection() {
     } catch (err: any) {
       setError(err.message || 'Erro ao iniciar sincronização');
     }
-  }, [maxChatsInput]);
+  }, [maxChatsInput, activeInstanceName, instanceName]);
 
   const handleCancelSync = useCallback(async () => {
     if (!job?.id) return;
@@ -357,7 +575,7 @@ export function IntegrationSection() {
         setQrBase64(null);
         // Aguarda brevemente pra Evolution atualizar os metadados do novo número
         await new Promise((r) => setTimeout(r, 1500));
-        await Promise.all([loadInstanceInfo(), loadDbStats()]);
+        await Promise.all([loadInstanceInfo(instanceName), loadDbStats()]);
         handleStartSync();
       } else {
         setError('Ainda não conectado. Tente escanear novamente.');
@@ -376,15 +594,16 @@ export function IntegrationSection() {
     setLoading(true);
     setError(null);
     try {
-      // Deleta a instância completamente (logout + delete)
-      // Isso limpa os metadados antigos da Evolution (ownerJid, profileName, etc.)
+      // Em produ\u00e7\u00e3o: apenas logout (preserva instance na Evolution, dados no DB intactos).
+      // Em sandbox: delete completo (libera a instance para recria\u00e7\u00e3o limpa).
+      const action = isProductionInstance ? 'logout' : 'delete';
       await supabase.functions.invoke('evolution-qrcode', {
-        body: { action: 'delete', instanceName: instanceName },
+        body: { action, instanceName },
       });
       setStatus('disconnected');
       setQrBase64(null);
       setJob(null);
-      setInstanceInfo(null);
+      if (!isProductionInstance) setInstanceInfo(null);
     } catch (err: any) {
       setError(err.message || 'Erro ao desconectar WhatsApp.');
     } finally {
@@ -410,7 +629,9 @@ export function IntegrationSection() {
 
   const st = statusConfig[status];
   const StatusIcon = st.icon;
-  const syncProgress = job && job.total_chats > 0 ? Math.round((job.synced_chats / job.total_chats) * 100) : 0;
+  const syncProgress = job && job.total_chats > 0
+    ? Math.min(100, Math.round(((job.batch_offset || 0) / job.total_chats) * 100))
+    : 0;
   const isRunning = job?.status === 'running' || job?.status === 'partial';
   const isDone = job?.status === 'done';
   const isError = job?.status === 'error';
@@ -610,6 +831,174 @@ export function IntegrationSection() {
             </div>
           </div>
 
+          {/* Pending media downloader */}
+          {(pendingMediaCount > 0 || downloadingMedia) && (
+            <div style={{
+              padding: 18, borderRadius: 16, marginBottom: 20,
+              background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(139, 92, 246, 0.03))',
+              border: '1px solid rgba(139, 92, 246, 0.25)',
+              display: 'flex', alignItems: 'center', gap: 14,
+            }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: 10,
+                background: 'rgba(139, 92, 246, 0.15)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                {downloadingMedia ? (
+                  <Loader size={18} style={{ color: '#8b5cf6', animation: 'spin 1s linear infinite' }} />
+                ) : (
+                  <ImageIcon size={18} style={{ color: '#8b5cf6' }} />
+                )}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--strong-text)', marginBottom: 2 }}>
+                  {downloadingMedia
+                    ? (cancelDownloadRef.current
+                        ? 'Cancelando download…'
+                        : `Baixando mídias… ${mediaProgress.downloaded} baixadas`)
+                    : `${pendingMediaCount.toLocaleString('pt-BR')} mídia${pendingMediaCount !== 1 ? 's' : ''} pendente${pendingMediaCount !== 1 ? 's' : ''}`}
+                </p>
+                <p style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
+                  {downloadingMedia
+                    ? `Restam ${pendingMediaCount.toLocaleString('pt-BR')} ${mediaProgress.failed > 0 ? `· ${mediaProgress.failed} falharam` : ''}`
+                    : 'Fotos, áudios e documentos aguardando download da Evolution'}
+                </p>
+              </div>
+              {downloadingMedia ? (
+                <button
+                  onClick={handleCancelDownload}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '10px 18px', borderRadius: 10,
+                    background: 'rgba(239, 68, 68, 0.12)',
+                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                    color: 'var(--red, #ef4444)',
+                    fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239, 68, 68, 0.2)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239, 68, 68, 0.12)'; }}
+                >
+                  <X size={14} /> Cancelar
+                </button>
+              ) : (
+                <button
+                  onClick={handleDownloadAllMedia}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '10px 18px', borderRadius: 10,
+                    background: '#8b5cf6',
+                    border: 'none',
+                    color: '#fff',
+                    fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                    boxShadow: '0 4px 12px rgba(139, 92, 246, 0.3)',
+                  }}
+                >
+                  Baixar agora
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Media analysis (AI) */}
+          {(pendingAnalysisCount > 0 || (analysisJob && ['running', 'pending'].includes(analysisJob.status))) && (() => {
+            const running = analysisJob?.status === 'running' || analysisLoopRef.current;
+            const total = analysisJob?.total || pendingAnalysisCount;
+            const processed = analysisJob?.processed || 0;
+            const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+            return (
+              <div style={{
+                padding: 18, borderRadius: 16, marginBottom: 20,
+                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(34, 197, 94, 0.03))',
+                border: '1px solid rgba(34, 197, 94, 0.25)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 10,
+                    background: 'rgba(34, 197, 94, 0.15)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                  }}>
+                    {running ? (
+                      <Loader size={18} style={{ color: '#22c55e', animation: 'spin 1s linear infinite' }} />
+                    ) : (
+                      <Sparkles size={18} style={{ color: '#22c55e' }} />
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--strong-text)', marginBottom: 2 }}>
+                      {running
+                        ? (analysisJob?.cancel_requested
+                            ? 'Cancelando análise…'
+                            : `Analisando mídias com IA… ${processed}/${total}`)
+                        : `${pendingAnalysisCount.toLocaleString('pt-BR')} mídia${pendingAnalysisCount !== 1 ? 's' : ''} sem análise`}
+                    </p>
+                    <p style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
+                      {running && analysisJob
+                        ? `${analysisJob.succeeded} ok · ${analysisJob.skipped} puladas${analysisJob.failed > 0 ? ` · ${analysisJob.failed} falharam` : ''}${analysisJob.current_media_type ? ` · ${analysisJob.current_media_type}` : ''}`
+                        : 'Transcrições de áudio, descrição de imagens e OCR de documentos'}
+                    </p>
+                  </div>
+                  {running ? (
+                    <button
+                      onClick={handleCancelAnalysis}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 8,
+                        padding: '10px 18px', borderRadius: 10,
+                        background: 'rgba(239, 68, 68, 0.12)',
+                        border: '1px solid rgba(239, 68, 68, 0.35)',
+                        color: 'var(--red, #ef4444)',
+                        fontSize: 13, fontWeight: 600,
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <X size={14} /> Cancelar
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleStartAnalysis}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 8,
+                        padding: '10px 18px', borderRadius: 10,
+                        background: '#22c55e',
+                        border: 'none',
+                        color: '#fff',
+                        fontSize: 13, fontWeight: 600,
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                        boxShadow: '0 4px 12px rgba(34, 197, 94, 0.3)',
+                      }}
+                    >
+                      Analisar agora
+                    </button>
+                  )}
+                </div>
+                {running && (
+                  <div style={{ marginTop: 12, height: 6, borderRadius: 3, background: 'rgba(34, 197, 94, 0.12)', overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${pct}%`,
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #22c55e, #4ade80)',
+                      transition: 'width 0.3s',
+                    }} />
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Seletor de grupo default */}
+          <GroupSelector instanceName={instanceName} instanceId={activeInstanceId} />
+
+          {/* Promoções ativas (auto-atualizadas) */}
+          <PromotionsSection instanceName={instanceName} instanceId={activeInstanceId} />
+
           {/* Technical Info */}
           <div style={{
             padding: 20, borderRadius: 16, marginBottom: 20,
@@ -746,7 +1135,7 @@ export function IntegrationSection() {
 
               <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
                 <button
-                  onClick={() => { loadInstanceInfo(); loadDbStats(); }}
+                  onClick={() => { loadInstanceInfo(instanceName); loadDbStats(); }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: 8,
                     padding: '10px 20px', borderRadius: 10,
@@ -813,20 +1202,30 @@ export function IntegrationSection() {
         onConfirm={confirmDisconnect}
         instanceInfo={instanceInfo}
         dbStats={dbStats}
+        isProduction={!!isProductionInstance}
+        instanceName={instanceName}
       />
     </div>
   );
 }
 
 function DisconnectModal({
-  open, onClose, onConfirm, instanceInfo, dbStats,
+  open, onClose, onConfirm, instanceInfo, dbStats, isProduction, instanceName,
 }: {
   open: boolean;
   onClose: () => void;
   onConfirm: () => void;
   instanceInfo: InstanceInfo | null;
   dbStats: DbStats | null;
+  isProduction: boolean;
+  instanceName: string;
 }) {
+  const [confirmInput, setConfirmInput] = useState('');
+
+  useEffect(() => {
+    if (!open) setConfirmInput('');
+  }, [open]);
+
   // Close on ESC
   useEffect(() => {
     if (!open) return;
@@ -834,6 +1233,8 @@ function DisconnectModal({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [open, onClose]);
+
+  const canConfirm = !isProduction || confirmInput.trim() === instanceName;
 
   return (
     <AnimatePresence>
@@ -970,6 +1371,24 @@ function DisconnectModal({
 
             {/* What will happen */}
             <div style={{ padding: '20px 24px 0' }}>
+              {isProduction && (
+                <div style={{
+                  padding: '10px 12px', borderRadius: 10, marginBottom: 14,
+                  background: 'rgba(239, 68, 68, 0.08)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  display: 'flex', alignItems: 'flex-start', gap: 10,
+                }}>
+                  <AlertTriangle size={16} style={{ color: 'var(--red, #ef4444)', flexShrink: 0, marginTop: 2 }} />
+                  <div>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--red, #ef4444)', marginBottom: 2 }}>
+                      Instância de PRODUÇÃO
+                    </p>
+                    <p style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
+                      Ação limitada a logout (instância preservada). Para re-conectar vai precisar escanear QR novamente.
+                    </p>
+                  </div>
+                </div>
+              )}
               <p style={{
                 fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
                 color: 'var(--fg-subtle)', marginBottom: 12,
@@ -980,8 +1399,10 @@ function DisconnectModal({
                 <ModalAction
                   variant="danger"
                   icon={<LogOut size={14} />}
-                  title="Instância removida da Evolution"
-                  description="A conexão WhatsApp será encerrada e a instância apagada"
+                  title={isProduction ? 'Instância faz logout (preservada)' : 'Instância removida da Evolution'}
+                  description={isProduction
+                    ? 'A conexão WhatsApp é encerrada, mas a instância continua registrada na Evolution'
+                    : 'A conexão WhatsApp será encerrada e a instância apagada'}
                 />
                 <ModalAction
                   variant="warning"
@@ -998,6 +1419,25 @@ function DisconnectModal({
                     : 'Conversas e mensagens já salvas no painel ficam intactas'}
                 />
               </div>
+
+              {isProduction && (
+                <div style={{ marginTop: 18 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--fg-subtle)', display: 'block', marginBottom: 6 }}>
+                    Digite <strong style={{ color: 'var(--strong-text)' }}>{instanceName}</strong> para confirmar
+                  </label>
+                  <input
+                    value={confirmInput}
+                    onChange={(e) => setConfirmInput(e.target.value)}
+                    placeholder={instanceName}
+                    autoFocus
+                    style={{
+                      width: '100%', height: 40, padding: '0 12px', borderRadius: 10,
+                      background: 'var(--surface-3)', border: `1px solid ${canConfirm ? 'var(--emerald)' : 'var(--border)'}`,
+                      fontSize: 13, color: 'var(--strong-text)', outline: 'none', fontFamily: 'monospace',
+                    }}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Footer */}
@@ -1021,21 +1461,25 @@ function DisconnectModal({
                 Cancelar
               </button>
               <button
-                onClick={onConfirm}
+                onClick={canConfirm ? onConfirm : undefined}
+                disabled={!canConfirm}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 8,
                   padding: '10px 20px', borderRadius: 10,
-                  background: 'var(--red, #ef4444)',
-                  border: '1px solid var(--red, #ef4444)',
-                  color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.25)',
+                  background: canConfirm ? 'var(--red, #ef4444)' : 'var(--surface-3)',
+                  border: `1px solid ${canConfirm ? 'var(--red, #ef4444)' : 'var(--border)'}`,
+                  color: canConfirm ? '#fff' : 'var(--fg-subtle)',
+                  fontSize: 13, fontWeight: 600,
+                  cursor: canConfirm ? 'pointer' : 'not-allowed',
+                  boxShadow: canConfirm ? '0 4px 12px rgba(239, 68, 68, 0.25)' : 'none',
+                  opacity: canConfirm ? 1 : 0.5,
                   transition: 'all 0.15s',
                 }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1.1)'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1)'; }}
+                onMouseEnter={(e) => { if (canConfirm) (e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1.1)'; }}
+                onMouseLeave={(e) => { if (canConfirm) (e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1)'; }}
               >
                 <LogOut size={14} />
-                Sim, desconectar
+                {isProduction ? 'Sim, fazer logout' : 'Sim, desconectar'}
               </button>
             </div>
           </motion.div>
@@ -1166,17 +1610,21 @@ function SyncProgressCard({ job, onCancel, onGoConversas }: { job: SyncJob; onCa
   const isDone = job.status === 'done';
   const isError = job.status === 'error';
 
-  const progress = job.total_chats > 0 ? Math.min(100, Math.round((job.synced_chats / job.total_chats) * 100)) : 0;
-  const target = job.max_chats || job.total_chats || 0;
+  // Progresso real = batch_offset (quantos foram processados, incluindo skips) / total_chats
+  // total_chats já vem como min(allEntries.length, max_chats) do sync v34+
+  const target = job.total_chats || job.max_chats || 0;
+  const processed = job.batch_offset || 0;
+  const shown = Math.min(processed, target);
+  const progress = target > 0 ? Math.min(100, Math.round((shown / target) * 100)) : 0;
 
   // ETA calc
   const startedAt = job.started_at ? new Date(job.started_at).getTime() : Date.now();
   const now = Date.now();
   const elapsedMs = now - startedAt;
   let etaMs = 0;
-  if (job.synced_chats > 0 && job.total_chats > 0 && isRunning) {
-    const perChat = elapsedMs / job.synced_chats;
-    etaMs = perChat * (job.total_chats - job.synced_chats);
+  if (shown > 0 && target > 0 && isRunning && shown < target) {
+    const perChat = elapsedMs / shown;
+    etaMs = perChat * (target - shown);
   }
 
   const totalDurationMs = isDone && job.finished_at && job.started_at
@@ -1236,7 +1684,7 @@ function SyncProgressCard({ job, onCancel, onGoConversas }: { job: SyncJob; onCa
         <div style={{ marginBottom: 18 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-dim)' }}>
-              {job.synced_chats} / {target} conversas
+              {shown} / {target} conversas
             </span>
             <span style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
               {isRunning && etaMs > 0

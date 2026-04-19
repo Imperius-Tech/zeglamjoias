@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import type { AISettings } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
+import { useDashboardStore } from '@/lib/store';
 import { FieldGroup, TextInput, TextArea, SelectInput, Toggle, SectionTitle, SaveButton } from './SettingsField';
 
 interface AIConfig {
@@ -32,18 +33,26 @@ export function AISection({ data, onSave }: { data: AISettings; onSave: (d: AISe
   const [aiConfig, setAiConfig] = useState<AIConfig | null>(null);
   const [showKey, setShowKey] = useState(false);
   const [savingAI, setSavingAI] = useState(false);
+  const activeInstanceId = useDashboardStore((s) => s.activeInstanceId);
 
   useEffect(() => {
-    supabase.from('ai_config').select('*').limit(1).single().then(({ data: cfg }) => {
-      if (cfg) setAiConfig({
-        enabled: cfg.enabled,
-        api_key: cfg.api_key,
-        provider: cfg.provider || 'gemini',
-        system_prompt: cfg.system_prompt,
-        model: cfg.model,
+    if (!activeInstanceId) return;
+    supabase
+      .from('ai_config')
+      .select('*')
+      .eq('instance_id', activeInstanceId)
+      .limit(1)
+      .maybeSingle()
+      .then(({ data: cfg }) => {
+        if (cfg) setAiConfig({
+          enabled: cfg.enabled,
+          api_key: cfg.api_key,
+          provider: cfg.provider || 'gemini',
+          system_prompt: cfg.system_prompt,
+          model: cfg.model,
+        });
       });
-    });
-  }, []);
+  }, [activeInstanceId]);
 
   const update = <K extends keyof AISettings>(k: K, v: AISettings[K]) =>
     setForm((prev) => ({ ...prev, [k]: v }));
@@ -54,7 +63,7 @@ export function AISection({ data, onSave }: { data: AISettings; onSave: (d: AISe
   };
 
   const handleSaveAI = async () => {
-    if (!aiConfig) return;
+    if (!aiConfig || !activeInstanceId) return;
     setSavingAI(true);
     await supabase.from('ai_config').update({
       api_key: aiConfig.api_key,
@@ -62,7 +71,7 @@ export function AISection({ data, onSave }: { data: AISettings; onSave: (d: AISe
       system_prompt: aiConfig.system_prompt,
       model: aiConfig.model,
       updated_at: new Date().toISOString(),
-    }).not('id', 'is', null);
+    }).eq('instance_id', activeInstanceId);
     setSavingAI(false);
   };
 

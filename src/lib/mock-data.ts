@@ -6,7 +6,7 @@ export interface Message {
   content: string;
   timestamp: Date;
   mediaUrl?: string | null;
-  mediaType?: 'image' | 'document' | 'sticker' | null;
+  mediaType?: 'image' | 'video' | 'audio' | 'document' | 'sticker' | null;
   status?: 'sent' | 'delivered' | 'read' | 'error' | null;
   quotedMessageId?: string | null;
   sentBy?: 'panel' | 'phone' | 'ai' | null;
@@ -46,6 +46,9 @@ export interface Conversation {
   isGroup?: boolean;
   groupCandidateStatus?: GroupCandidateStatus;
   groupCandidateData?: GroupCandidateData | null;
+  messagesLoaded?: boolean;
+  priority?: 'normal' | 'alta' | 'altissima' | null;
+  priorityReason?: string | null;
 }
 
 export interface KnowledgeEntry {

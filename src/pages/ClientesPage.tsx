@@ -46,9 +46,17 @@ const sentimentColors: Record<string, string> = {
 };
 
 const prioridadeColors: Record<string, string> = {
+  altissima: '#ef4444',
   alta: 'var(--red)',
   media: 'var(--amber)',
   baixa: 'var(--fg-subtle)',
+};
+
+const prioridadeLabels: Record<string, string> = {
+  altissima: 'Altíssima',
+  alta: 'Alta',
+  media: 'Média',
+  baixa: 'Baixa',
 };
 
 interface Analysis {
@@ -176,7 +184,7 @@ function AIAnalysisPanel({ conversationId }: { conversationId: string }) {
             <span style={{ fontSize: 10, color: 'var(--fg-subtle)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>Prioridade</span>
           </div>
           <p style={{ fontSize: 13, fontWeight: 600, color: prioridadeColors[analysis.prioridade || ''] || 'var(--fg-dim)' }}>
-            {analysis.prioridade ? analysis.prioridade.charAt(0).toUpperCase() + analysis.prioridade.slice(1) : 'N/A'}
+            {analysis.prioridade ? (prioridadeLabels[analysis.prioridade] || analysis.prioridade) : 'N/A'}
           </p>
         </div>
 
@@ -248,7 +256,7 @@ function GroupCandidateProfilePanel({ conv }: { conv: Conversation }) {
     { key: 'cidade', label: 'Cidade' },
     { key: 'galvanica', label: 'Galvânica' },
     { key: 'outro_grupo', label: 'Outro grupo?' },
-    { key: 'outro_grupo_nome', label: 'Nome do outro grupo' },
+    { key: 'outro_grupo_nome', label: 'Indicação' },
   ];
 
   const statusConfig = {

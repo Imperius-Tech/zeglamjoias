@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
-import { Search, MessageCircle, Users, ArrowUpDown, CheckCheck, Loader } from 'lucide-react';
+import { Search, MessageCircle, Users, ArrowUpDown, CheckCheck, Loader, AlertTriangle } from 'lucide-react';
 import { useDashboardStore } from '@/lib/store';
 import type { ConversationStatus } from '@/lib/mock-data';
 import { ConversationItem } from './ConversationItem';
 
-type FilterValue = 'all' | ConversationStatus | 'adicionar_grupo';
+type FilterValue = 'all' | ConversationStatus | 'adicionar_grupo' | 'urgentes';
 const filters: { value: FilterValue; label: string }[] = [
   { value: 'all', label: 'Todas' },
+  { value: 'urgentes', label: 'Urgentes' },
   { value: 'adicionar_grupo', label: 'Adicionar ao grupo' },
   { value: 'ia_respondendo', label: 'IA respondendo' },
   { value: 'aguardando_humano', label: 'Aguardando' },
@@ -23,7 +24,7 @@ const sortOptions: { value: SortKind; label: string }[] = [
   { value: 'name', label: 'Nome (A-Z)' },
 ];
 
-const priorityWeight: Record<string, number> = { alta: 3, media: 2, baixa: 1 };
+const priorityWeight: Record<string, number> = { altissima: 4, alta: 3, media: 2, baixa: 1 };
 
 type TabKind = 'individuais' | 'grupos';
 
@@ -47,6 +48,11 @@ export function ConversationList() {
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [markingRead, setMarkingRead] = useState(false);
 
+  // Contador de urgentes (priority=altissima) - aba individuais
+  const urgentCount = useMemo(() => {
+    return conversations.filter((c) => !c.isGroup && (c.priority === 'altissima' || c.aiAnalysis?.prioridade === 'altissima')).length;
+  }, [conversations]);
+
   // Contadores por tipo (respeitam search mas não o filter)
   const { individualCount, groupCount } = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -63,9 +69,14 @@ export function ConversationList() {
     return { individualCount: ind, groupCount: grp };
   }, [conversations, searchQuery]);
 
+  const isUrgent = (c: { priority?: string | null; aiAnalysis?: { prioridade?: string } | null }) =>
+    c.priority === 'altissima' || c.aiAnalysis?.prioridade === 'altissima';
+
   const filtered = useMemo(() => {
     let r = conversations.filter((c) => (activeTab === 'grupos' ? !!c.isGroup : !c.isGroup));
-    if (filter === 'adicionar_grupo') {
+    if (filter === 'urgentes') {
+      r = r.filter(isUrgent);
+    } else if (filter === 'adicionar_grupo') {
       r = r.filter((c) => c.groupCandidateStatus === 'dados_coletados' || c.groupCandidateStatus === 'aguardando_dados');
     } else if (filter !== 'all') {
       r = r.filter((c) => c.status === filter);
@@ -75,11 +86,14 @@ export function ConversationList() {
       r = r.filter((c) => c.customerName.toLowerCase().includes(q) || c.messages.some((m) => m.content.toLowerCase().includes(q)));
     }
     const sorted = [...r];
-    // Conversas com "dados_coletados" SEMPRE vão pro topo, independente do sort escolhido
+    // PRIORIDADE MÁXIMA no topo: urgentes (altissima) sempre primeiro, depois dados_coletados, depois resto
+    const pinUrgent = (c: { priority?: string | null; aiAnalysis?: any }) => (isUrgent(c) ? 1 : 0);
     const pinCandidate = (c: { groupCandidateStatus?: string | null }) => (c.groupCandidateStatus === 'dados_coletados' ? 1 : 0);
     switch (sortBy) {
       case 'oldest':
         sorted.sort((a, b) => {
+          const u = pinUrgent(b) - pinUrgent(a);
+          if (u !== 0) return u;
           const pd = pinCandidate(b) - pinCandidate(a);
           if (pd !== 0) return pd;
           return a.lastMessageAt.getTime() - b.lastMessageAt.getTime();
@@ -87,6 +101,8 @@ export function ConversationList() {
         break;
       case 'unread':
         sorted.sort((a, b) => {
+          const u = pinUrgent(b) - pinUrgent(a);
+          if (u !== 0) return u;
           const pd = pinCandidate(b) - pinCandidate(a);
           if (pd !== 0) return pd;
           if ((b.unreadCount > 0 ? 1 : 0) !== (a.unreadCount > 0 ? 1 : 0)) {
@@ -100,8 +116,8 @@ export function ConversationList() {
         sorted.sort((a, b) => {
           const pd = pinCandidate(b) - pinCandidate(a);
           if (pd !== 0) return pd;
-          const pa = priorityWeight[a.aiAnalysis?.prioridade as string] ?? 0;
-          const pb = priorityWeight[b.aiAnalysis?.prioridade as string] ?? 0;
+          const pa = Math.max(priorityWeight[a.priority as string] ?? 0, priorityWeight[a.aiAnalysis?.prioridade as string] ?? 0);
+          const pb = Math.max(priorityWeight[b.priority as string] ?? 0, priorityWeight[b.aiAnalysis?.prioridade as string] ?? 0);
           if (pb !== pa) return pb - pa;
           const aWait = a.status === 'aguardando_humano' ? 1 : 0;
           const bWait = b.status === 'aguardando_humano' ? 1 : 0;
@@ -111,6 +127,8 @@ export function ConversationList() {
         break;
       case 'name':
         sorted.sort((a, b) => {
+          const u = pinUrgent(b) - pinUrgent(a);
+          if (u !== 0) return u;
           const pd = pinCandidate(b) - pinCandidate(a);
           if (pd !== 0) return pd;
           return a.customerName.localeCompare(b.customerName, 'pt-BR');
@@ -119,6 +137,8 @@ export function ConversationList() {
       case 'recent':
       default:
         sorted.sort((a, b) => {
+          const u = pinUrgent(b) - pinUrgent(a);
+          if (u !== 0) return u;
           const pd = pinCandidate(b) - pinCandidate(a);
           if (pd !== 0) return pd;
           return b.lastMessageAt.getTime() - a.lastMessageAt.getTime();
@@ -216,6 +236,9 @@ export function ConversationList() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
           {filters.map((f) => {
             const active = filter === f.value;
+            const isUrgenteBtn = f.value === 'urgentes';
+            const hideUrgente = isUrgenteBtn && urgentCount === 0;
+            if (hideUrgente) return null;
             return (
               <button
                 key={f.value}
@@ -223,29 +246,49 @@ export function ConversationList() {
                 style={{
                   padding: '7px 14px', borderRadius: 20, cursor: 'pointer',
                   fontSize: 11, fontWeight: 600, transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
-                  color: active ? '#fff' : 'var(--fg-muted)',
-                  background: active ? 'var(--accent)' : 'var(--glass-strong)',
-                  border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
-                  boxShadow: active ? '0 4px 12px rgba(212, 175, 55, 0.25)' : 'none',
+                  color: active
+                    ? '#fff'
+                    : isUrgenteBtn
+                      ? '#ef4444'
+                      : 'var(--fg-muted)',
+                  background: active
+                    ? (isUrgenteBtn ? '#ef4444' : 'var(--accent)')
+                    : (isUrgenteBtn ? 'rgba(239,68,68,0.1)' : 'var(--glass-strong)'),
+                  border: active
+                    ? (isUrgenteBtn ? '1px solid #ef4444' : '1px solid var(--accent)')
+                    : (isUrgenteBtn ? '1px solid rgba(239,68,68,0.35)' : '1px solid var(--border)'),
+                  boxShadow: active
+                    ? (isUrgenteBtn ? '0 4px 12px rgba(239,68,68,0.35)' : '0 4px 12px rgba(212, 175, 55, 0.25)')
+                    : 'none',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
                 }}
                 onMouseEnter={(e) => {
-                  if (!active) {
+                  if (!active && !isUrgenteBtn) {
                     (e.currentTarget as HTMLButtonElement).style.background = 'var(--surface-3)';
                     (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-muted)';
                   }
                 }}
                 onMouseLeave={(e) => {
-                  if (!active) {
+                  if (!active && !isUrgenteBtn) {
                     (e.currentTarget as HTMLButtonElement).style.background = 'var(--glass-strong)';
                     (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)';
                   }
                 }}
               >
-                {active && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />}
+                {isUrgenteBtn && <AlertTriangle size={11} />}
+                {!isUrgenteBtn && active && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />}
                 {f.label}
+                {isUrgenteBtn && urgentCount > 0 && (
+                  <span style={{
+                    padding: '1px 6px', borderRadius: 8, fontSize: 10, fontWeight: 800,
+                    background: active ? 'rgba(255,255,255,0.25)' : '#ef4444',
+                    color: '#fff',
+                  }}>
+                    {urgentCount}
+                  </span>
+                )}
               </button>
             );
           })}

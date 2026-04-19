@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, UserPlus, X, RefreshCw, Copy, Loader, Search, Users, AlertCircle } from 'lucide-react';
+import { Check, UserPlus, X, RefreshCw, Copy, Loader, Search, Users, AlertCircle, ChevronUp, ChevronDown } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useDashboardStore } from '@/lib/store';
 import type { Conversation, GroupCandidateData } from '@/lib/mock-data';
@@ -12,7 +12,7 @@ const fields: { key: FieldKey; label: string }[] = [
   { key: 'cidade', label: 'Cidade' },
   { key: 'galvanica', label: 'Galvânica' },
   { key: 'outro_grupo', label: 'Outro grupo?' },
-  { key: 'outro_grupo_nome', label: 'Nome do outro grupo' },
+  { key: 'outro_grupo_nome', label: 'Indicação' },
 ];
 
 type MembershipCheck = { alreadyMember: boolean; groupName: string | null; participantCount: number } | null;
@@ -21,12 +21,24 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
   const [busy, setBusy] = useState<null | 'refresh' | 'mark_added' | 'dismiss' | 'check' | 'add'>(null);
   const [membership, setMembership] = useState<MembershipCheck>(null);
   const [addResult, setAddResult] = useState<{ method?: string; inviteUrl?: string; error?: string } | null>(null);
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem(`group-card-collapsed-${conv.id}`) === '1';
+  });
   const data = conv.groupCandidateData || {};
   const status = conv.groupCandidateStatus;
 
   if (!status || status === 'adicionada' || status === 'recusada') return null;
 
   const complete = status === 'dados_coletados';
+
+  const toggleCollapse = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    if (next) localStorage.setItem(`group-card-collapsed-${conv.id}`, '1');
+    else localStorage.removeItem(`group-card-collapsed-${conv.id}`);
+  };
+
+  const filledCount = fields.filter((f) => data[f.key]).length;
 
   const refresh = async () => {
     if (busy) return;
@@ -122,7 +134,7 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
         : 'linear-gradient(to right, rgba(251,191,36,0.08), rgba(251,191,36,0.02))',
       border: `1px solid ${complete ? 'rgba(16,185,129,0.3)' : 'rgba(251,191,36,0.25)'}`,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: collapsed ? 0 : 10 }}>
         <UserPlus size={16} style={{ color: complete ? 'var(--emerald-light)' : '#fbbf24' }} />
         <span style={{
           fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em',
@@ -130,24 +142,46 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
         }}>
           {complete ? 'Pronta para adicionar ao grupo' : 'Coletando dados de entrada no grupo'}
         </span>
+        {collapsed && (
+          <span style={{
+            fontSize: 10, padding: '2px 8px', borderRadius: 6,
+            background: complete ? 'rgba(16,185,129,0.12)' : 'rgba(251,191,36,0.12)',
+            color: complete ? 'var(--emerald-light)' : '#fbbf24', fontWeight: 700,
+          }}>
+            {filledCount}/{fields.length} preenchidos
+          </span>
+        )}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          {!collapsed && (
+            <>
+              <button
+                onClick={copyAll}
+                title="Copiar dados"
+                style={{ padding: 6, borderRadius: 6, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+              >
+                <Copy size={12} />
+              </button>
+              <button
+                onClick={refresh}
+                disabled={busy === 'refresh'}
+                title="Re-extrair do histórico"
+                style={{ padding: 6, borderRadius: 6, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-muted)', cursor: busy === 'refresh' ? 'wait' : 'pointer', display: 'flex', alignItems: 'center' }}
+              >
+                {busy === 'refresh' ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={12} />}
+              </button>
+            </>
+          )}
           <button
-            onClick={copyAll}
-            title="Copiar dados"
+            onClick={toggleCollapse}
+            title={collapsed ? 'Expandir' : 'Recolher'}
             style={{ padding: 6, borderRadius: 6, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
           >
-            <Copy size={12} />
-          </button>
-          <button
-            onClick={refresh}
-            disabled={busy === 'refresh'}
-            title="Re-extrair do histórico"
-            style={{ padding: 6, borderRadius: 6, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-muted)', cursor: busy === 'refresh' ? 'wait' : 'pointer', display: 'flex', alignItems: 'center' }}
-          >
-            {busy === 'refresh' ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={12} />}
+            {collapsed ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
           </button>
         </div>
       </div>
+
+      {!collapsed && (<>
 
       {/* Grid de campos */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
@@ -282,6 +316,8 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
           Adicionar ao grupo
         </button>
       </div>
+
+      </>)}
     </div>
   );
 }

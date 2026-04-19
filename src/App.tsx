@@ -5,6 +5,7 @@ import { useDashboardStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import ConversasPage from '@/pages/ConversasPage';
 import ConhecimentoPage from '@/pages/ConhecimentoPage';
+import TreinamentoPage from '@/pages/TreinamentoPage';
 import ClientesPage from '@/pages/ClientesPage';
 import ComprovantesPage from '@/pages/ComprovantesPage';
 import AutomacoesPage from '@/pages/AutomacoesPage';
@@ -14,6 +15,7 @@ import LoginPage from '@/pages/LoginPage';
 import { Loader } from 'lucide-react';
 
 export default function App() {
+  const loadInstances = useDashboardStore((s) => s.loadInstances);
   const loadConversations = useDashboardStore((s) => s.loadConversations);
   const loadKnowledgeEntries = useDashboardStore((s) => s.loadKnowledgeEntries);
   const subscribeRealtime = useDashboardStore((s) => s.subscribeRealtime);
@@ -37,10 +39,18 @@ export default function App() {
       setAuthLoading(false);
     });
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setAuthLoading(false);
+    // Listen for auth changes — só reage a mudança REAL de usuário (login/logout).
+    // Ignora TOKEN_REFRESHED (dispara ao voltar a aba) e USER_UPDATED para evitar reload.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
+        setSession((prev: any) => {
+          const prevId = prev?.user?.id || null;
+          const newId = newSession?.user?.id || null;
+          if (prevId === newId) return prev; // user igual — mantém referência pra não disparar effects
+          return newSession;
+        });
+        setAuthLoading(false);
+      }
     });
 
     // Initialize theme
@@ -54,14 +64,18 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  const userId = session?.user?.id || null;
   useEffect(() => {
-    if (session) {
-      loadConversations();
-      loadKnowledgeEntries();
+    if (userId) {
+      (async () => {
+        await loadInstances();
+        await Promise.all([loadConversations(), loadKnowledgeEntries()]);
+      })();
       const unsubscribe = subscribeRealtime();
       return unsubscribe;
     }
-  }, [session, loadConversations, loadKnowledgeEntries, subscribeRealtime]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   if (authLoading) {
     return (
@@ -84,6 +98,7 @@ export default function App() {
                   <Route path="/" element={<Navigate to="/conversas" replace />} />
                   <Route path="/conversas" element={<ConversasPage />} />
                   <Route path="/conhecimento" element={<ConhecimentoPage />} />
+                  <Route path="/treinamento" element={<TreinamentoPage />} />
                   <Route path="/clientes" element={<ClientesPage />} />
                   <Route path="/comprovantes" element={<ComprovantesPage />} />
                   <Route path="/automacoes" element={<AutomacoesPage />} />

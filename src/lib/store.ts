@@ -12,23 +12,36 @@ import { conversations as mockConversations, knowledgeEntries as mockKnowledge }
 
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
+export interface Instance {
+  id: string;
+  evolutionInstanceId: string;
+  evolutionInstanceName: string;
+  displayName: string;
+  color: string;
+  isSandbox: boolean;
+}
+
 interface DashboardState {
   conversations: Conversation[];
   selectedConversationId: string | null;
-  conversationFilter: 'all' | ConversationStatus | 'adicionar_grupo';
+  conversationFilter: 'all' | ConversationStatus | 'adicionar_grupo' | 'urgentes';
   searchQuery: string;
   knowledgeEntries: KnowledgeEntry[];
   selectedCategory: CategoryKey | null;
   loading: boolean;
   theme: 'dark' | 'light';
 
+  instances: Instance[];
   activeInstanceId: string | null;
   activeInstanceName: string | null;
 
+  loadInstances: () => Promise<void>;
+  switchInstance: (evolutionInstanceId: string) => Promise<void>;
   loadConversations: () => Promise<void>;
+  loadConversationMessages: (conversationId: string) => Promise<void>;
   loadKnowledgeEntries: () => Promise<void>;
   selectConversation: (id: string | null) => void;
-  setFilter: (filter: 'all' | ConversationStatus | 'adicionar_grupo') => void;
+  setFilter: (filter: 'all' | ConversationStatus | 'adicionar_grupo' | 'urgentes') => void;
   setSearchQuery: (query: string) => void;
   markAllAsRead: () => Promise<void>;
   takeoverConversation: (id: string) => Promise<void>;
@@ -49,31 +62,98 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   selectedCategory: null,
   loading: true,
   theme: (localStorage.getItem('zeglam_theme') as 'dark' | 'light') || 'dark',
+  instances: [],
   activeInstanceId: null,
   activeInstanceName: null,
 
-  loadConversations: async () => {
-    if (get().loading && get().conversations.length > 0) return; // Prevent double load
+  loadInstances: async () => {
+    if (DEMO_MODE) return;
 
+    const { data } = await supabase
+      .from('instances')
+      .select('*')
+      .order('is_sandbox', { ascending: true });
+
+    if (!data) return;
+
+    const instances: Instance[] = data.map((r) => ({
+      id: r.id,
+      evolutionInstanceId: r.evolution_instance_id,
+      evolutionInstanceName: r.evolution_instance_name,
+      displayName: r.display_name,
+      color: r.color || '#d4af37',
+      isSandbox: !!r.is_sandbox,
+    }));
+
+    const { data: evoConfig } = await supabase
+      .from('evolution_config')
+      .select('active_instance_id')
+      .limit(1)
+      .maybeSingle();
+
+    const storedId = localStorage.getItem('zeglam_active_instance');
+    const activeId = storedId || evoConfig?.active_instance_id || instances[0]?.evolutionInstanceId || null;
+    const active = instances.find((i) => i.evolutionInstanceId === activeId) || instances[0] || null;
+
+    set({
+      instances,
+      activeInstanceId: active?.evolutionInstanceId || null,
+      activeInstanceName: active?.evolutionInstanceName || null,
+    });
+  },
+
+  switchInstance: async (evolutionInstanceId) => {
+    const { instances } = get();
+    const target = instances.find((i) => i.evolutionInstanceId === evolutionInstanceId);
+    if (!target) return;
+
+    localStorage.setItem('zeglam_active_instance', target.evolutionInstanceId);
+
+    set({
+      activeInstanceId: target.evolutionInstanceId,
+      activeInstanceName: target.evolutionInstanceName,
+      conversations: [],
+      selectedConversationId: null,
+      loading: true,
+    });
+
+    await supabase
+      .from('evolution_config')
+      .update({
+        active_instance_id: target.evolutionInstanceId,
+        instance_name: target.evolutionInstanceName,
+        updated_at: new Date().toISOString(),
+      })
+      .not('id', 'is', null);
+
+    await Promise.all([get().loadConversations(), get().loadKnowledgeEntries()]);
+  },
+
+  loadConversations: async () => {
     if (DEMO_MODE) {
       set({ conversations: mockConversations, loading: false });
       return;
     }
 
-    set({ loading: true, conversations: [] }); // CLEAR LIST IMMEDIATELY
+    // Só mostra loading/limpa lista se não tem nada carregado ainda.
+    // Refetch com dados existentes é silencioso para evitar flicker ao voltar à aba.
+    const hadData = get().conversations.length > 0;
+    if (!hadData) set({ loading: true, conversations: [] });
 
-    // Fetch current config to ensure we have the right IDs
-    const { data: evoConfig } = await supabase
-      .from('evolution_config')
-      .select('active_instance_id, instance_name')
-      .limit(1)
-      .maybeSingle();
+    // Prefer state (set by loadInstances/switchInstance); fallback to evolution_config
+    let activeInstanceId = get().activeInstanceId;
+    let activeInstanceName = get().activeInstanceName;
 
-    const activeInstanceId = evoConfig?.active_instance_id || null;
-    const activeInstanceName = evoConfig?.instance_name || null;
-
-    // Update state immediately so realtime handlers are in sync
-    set({ activeInstanceId, activeInstanceName });
+    if (!activeInstanceId) {
+      const { data: evoConfig } = await supabase
+        .from('evolution_config')
+        .select('active_instance_id, instance_name')
+        .limit(1)
+        .maybeSingle();
+      activeInstanceId = evoConfig?.active_instance_id || null;
+      activeInstanceName = evoConfig?.instance_name || null;
+      set({ activeInstanceId, activeInstanceName });
+    }
 
     if (!activeInstanceId) {
       set({ conversations: [], loading: false });
@@ -92,52 +172,123 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       return;
     }
 
+    // Carrega só a ÚLTIMA mensagem de cada conversa (pro preview da lista).
+    // Mensagens completas carregam lazy via loadConversationMessages quando a conversa é aberta.
+    // Query RPC seria mais eficiente, mas uma janela pequena (LIMIT 1 por conv) já resolve.
     const convIds = convos.map((c) => c.id);
+    const lastMsgByConv = new Map<string, any>();
 
-    // 2. Fetch messages ONLY for these conversations (Optimized & Isolated)
-    const { data: msgs } = await supabase
-      .from('messages')
-      .select('*')
-      .in('conversation_id', convIds)
-      .order('created_at', { ascending: true });
+    // Pega últimas mensagens via paginação (últimas por created_at desc, uma por conversa)
+    // Usa query direta filtrando pelas conversas desta instância
+    const CHUNK = 500;
+    for (let i = 0; i < convIds.length; i += CHUNK) {
+      const slice = convIds.slice(i, i + CHUNK);
+      // Fetch as N últimas mensagens (1 por conversa aprox) — buscamos as mais recentes
+      // e fazemos dedup no cliente
+      const { data: recentMsgs } = await supabase
+        .from('messages')
+        .select('id, conversation_id, author, content, media_type, media_url, created_at, status, is_draft')
+        .in('conversation_id', slice)
+        .eq('is_draft', false)
+        .order('created_at', { ascending: false })
+        .limit(slice.length * 3); // margem pra capturar pelo menos 1 por conversa na maioria
 
-    // 3. Assemble isolated data structure
-    const conversations: Conversation[] = convos.map((c) => ({
-      id: c.id,
-      customerName: c.customer_name,
-      customerPhone: c.customer_phone,
-      profilePicUrl: c.profile_pic_url || null,
-      status: c.status as ConversationStatus,
-      conversationType: (c.conversation_type || 'unknown') as ConversationType,
-      aiEnabled: c.ai_enabled ?? true,
-      unreadCount: c.unread_count || 0,
-      aiAnalysis: c.ai_analysis || null,
-      lastMessageAt: new Date(c.last_message_at),
-      whatsappJid: c.whatsapp_jid || null,
-      isGroup: typeof c.whatsapp_jid === 'string' && c.whatsapp_jid.endsWith('@g.us'),
-      groupCandidateStatus: c.group_candidate_status || null,
-      groupCandidateData: c.group_candidate_data || null,
-      messages: (msgs ?? [])
-        .filter((m) => m.conversation_id === c.id)
-        .map((m) => ({
-          id: m.id,
-          author: m.author as Message['author'],
-          content: m.content,
-          timestamp: new Date(m.created_at),
-          mediaUrl: m.media_url || null,
-          mediaType: m.media_type as Message['mediaType'] || null,
-          status: m.status as Message['status'] || null,
-          quotedMessageId: m.quoted_message_id || null,
-          sentBy: m.sent_by as Message['sentBy'] || null,
-          isDraft: m.is_draft || false,
-          mediaAnalysis: m.media_analysis || null,
-          suggestionGroupId: m.suggestion_group_id || null,
-          suggestionConfidence: m.suggestion_confidence ?? null,
-          suggestionStyle: (m.suggestion_style as Message['suggestionStyle']) || null,
-        })),
-    }));
+      if (recentMsgs) {
+        for (const m of recentMsgs) {
+          if (!lastMsgByConv.has(m.conversation_id)) {
+            lastMsgByConv.set(m.conversation_id, m);
+          }
+        }
+      }
+    }
+
+    // Assembla conversations com apenas a última mensagem (preview).
+    // messagesLoaded=false indica que o histórico completo ainda não foi carregado.
+    const conversations: Conversation[] = convos.map((c) => {
+      const lastMsg = lastMsgByConv.get(c.id);
+      const messages = lastMsg ? [{
+        id: lastMsg.id,
+        author: lastMsg.author as Message['author'],
+        content: lastMsg.content,
+        timestamp: new Date(lastMsg.created_at),
+        mediaUrl: lastMsg.media_url || null,
+        mediaType: lastMsg.media_type as Message['mediaType'] || null,
+        status: lastMsg.status as Message['status'] || null,
+        quotedMessageId: null,
+        sentBy: null,
+        isDraft: lastMsg.is_draft || false,
+        mediaAnalysis: null,
+        suggestionGroupId: null,
+        suggestionConfidence: null,
+        suggestionStyle: null,
+      }] : [];
+
+      return {
+        id: c.id,
+        customerName: c.customer_name,
+        customerPhone: c.customer_phone,
+        profilePicUrl: c.profile_pic_url || null,
+        status: c.status as ConversationStatus,
+        conversationType: (c.conversation_type || 'unknown') as ConversationType,
+        aiEnabled: c.ai_enabled ?? true,
+        unreadCount: c.unread_count || 0,
+        aiAnalysis: c.ai_analysis || null,
+        lastMessageAt: new Date(c.last_message_at),
+        whatsappJid: c.whatsapp_jid || null,
+        isGroup: typeof c.whatsapp_jid === 'string' && c.whatsapp_jid.endsWith('@g.us'),
+        groupCandidateStatus: c.group_candidate_status || null,
+        groupCandidateData: c.group_candidate_data || null,
+        priority: c.priority || 'normal',
+        priorityReason: c.priority_reason || null,
+        messages,
+        messagesLoaded: false,
+      };
+    });
 
     set({ conversations, loading: false, activeInstanceId, activeInstanceName });
+  },
+
+  loadConversationMessages: async (conversationId: string) => {
+    if (DEMO_MODE) return;
+
+    const msgs: any[] = [];
+    let from = 0;
+    const pageSize = 1000;
+    while (true) {
+      const { data: page } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (!page || page.length === 0) break;
+      for (const m of page) msgs.push(m);
+      if (page.length < pageSize) break;
+      from += pageSize;
+    }
+
+    const messages: Message[] = msgs.map((m) => ({
+      id: m.id,
+      author: m.author as Message['author'],
+      content: m.content,
+      timestamp: new Date(m.created_at),
+      mediaUrl: m.media_url || null,
+      mediaType: m.media_type as Message['mediaType'] || null,
+      status: m.status as Message['status'] || null,
+      quotedMessageId: m.quoted_message_id || null,
+      sentBy: m.sent_by as Message['sentBy'] || null,
+      isDraft: m.is_draft || false,
+      mediaAnalysis: m.media_analysis || null,
+      suggestionGroupId: m.suggestion_group_id || null,
+      suggestionConfidence: m.suggestion_confidence ?? null,
+      suggestionStyle: (m.suggestion_style as Message['suggestionStyle']) || null,
+    }));
+
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === conversationId ? { ...c, messages, messagesLoaded: true } : c
+      ),
+    }));
   },
 
   loadKnowledgeEntries: async () => {
@@ -146,9 +297,16 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       return;
     }
 
+    const activeInstanceId = get().activeInstanceId;
+    if (!activeInstanceId) {
+      set({ knowledgeEntries: [] });
+      return;
+    }
+
     const { data } = await supabase
       .from('knowledge_entries')
       .select('*')
+      .eq('instance_id', activeInstanceId)
       .order('created_at', { ascending: false });
 
     if (!data) return;
@@ -173,7 +331,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
     const conversations = get().conversations;
     const conv = conversations.find(c => c.id === id);
-    
+
     if (!conv) {
       set({ selectedConversationId: id });
       return;
@@ -189,14 +347,17 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       ),
     }));
 
-    // Update in DB (Async)
+    // Lazy-load mensagens completas (se ainda não carregadas)
+    if (!conv.messagesLoaded) {
+      get().loadConversationMessages(id);
+    }
+
+    // Update in DB (Async) — realtime subscriber will reconcile any drift
     const updates: any = { unread_count: 0 };
     if (needsStatusUpdate) updates.status = 'ia_respondendo';
-    
+
     supabase.from('conversations').update(updates).eq('id', id).then(({ error }) => {
       if (error) console.error('Error updating conversation status:', error);
-      // Force refresh to ensure everything is in sync
-      get().loadConversations();
     });
   },
 
@@ -258,9 +419,12 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   setSelectedCategory: (category) => set({ selectedCategory: category }),
 
   addKnowledgeEntry: async (entry) => {
+    const activeInstanceId = get().activeInstanceId;
+    if (!activeInstanceId) return;
+
     const { data } = await supabase
       .from('knowledge_entries')
-      .insert({ category: entry.category, question: entry.question, answer: entry.answer })
+      .insert({ category: entry.category, question: entry.question, answer: entry.answer, instance_id: activeInstanceId })
       .select()
       .single();
 
@@ -356,11 +520,17 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
             const hasTempDuplicate = m.author === 'humano' && c.messages.some(
               (msg) => msg.id.startsWith('temp-') && msg.content === m.content
             );
-            const messages = hasTempDuplicate
-              ? c.messages.map((msg) =>
-                  msg.id.startsWith('temp-') && msg.content === m.content ? newMsg : msg
-                )
-              : [...c.messages, newMsg];
+            let messages: Message[];
+            if (hasTempDuplicate) {
+              messages = c.messages.map((msg) =>
+                msg.id.startsWith('temp-') && msg.content === m.content ? newMsg : msg
+              );
+            } else if (!c.messagesLoaded) {
+              // Conversa ainda não foi aberta: mantém só a última como preview
+              messages = [newMsg];
+            } else {
+              messages = [...c.messages, newMsg];
+            }
             return { ...c, messages, lastMessageAt: new Date(m.created_at) };
           }),
         }));
@@ -420,6 +590,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
                   aiAnalysis: updated.ai_analysis ?? c.aiAnalysis,
                   groupCandidateStatus: updated.group_candidate_status ?? c.groupCandidateStatus,
                   groupCandidateData: updated.group_candidate_data ?? c.groupCandidateData,
+                  priority: updated.priority ?? c.priority,
+                  priorityReason: updated.priority_reason ?? c.priorityReason,
                 }
               : c
           ).sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime()),

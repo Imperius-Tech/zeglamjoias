@@ -1,8 +1,18 @@
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Users } from 'lucide-react';
+import { Users, AlertTriangle } from 'lucide-react';
 import { useDashboardStore } from '@/lib/store';
 import type { Conversation, ConversationStatus } from '@/lib/mock-data';
+
+const PRIORITY_REASON_LABEL: Record<string, string> = {
+  status_pedido: 'Status do pedido',
+  rastreio: 'Rastreio',
+  valor_especifico: 'Valor/desconto',
+  confirmacao_pagamento: 'Confirmação de pagamento',
+  reclamacao_produto: 'Reclamação',
+  alteracao_pedido: 'Alteração de pedido',
+  outro: 'Ação humana',
+};
 
 const statusConfig: Record<ConversationStatus, { color: string; label: string }> = {
   ia_respondendo: { color: 'var(--emerald)', label: 'IA respondendo' },
@@ -36,6 +46,8 @@ function formatPhone(phone: string) {
 export function ConversationItem({ conversation: c, isActive, onClick }: { conversation: Conversation; isActive: boolean; onClick: () => void }) {
   const last = c.messages[c.messages.length - 1];
   const st = statusConfig[c.status];
+  const isUrgent = c.priority === 'altissima' || c.aiAnalysis?.prioridade === 'altissima';
+  const urgentReason = c.priorityReason || c.aiAnalysis?.consulta_pendente || null;
 
   // Identificação inteligente: se o nome for numérico ou curto demais, usa o telefone formatado
   const isNumeric = /^\d+$/.test(c.customerName || '');
@@ -55,9 +67,21 @@ export function ConversationItem({ conversation: c, isActive, onClick }: { conve
         borderRadius: 14,
         cursor: 'pointer',
         marginBottom: 4,
-        background: isActive ? 'var(--glass-strong)' : 'transparent',
-        border: isActive ? '1px solid var(--accent)' : '1px solid transparent',
-        boxShadow: isActive ? '0 8px 24px rgba(212, 175, 55, 0.15)' : 'none',
+        background: isActive
+          ? 'var(--glass-strong)'
+          : isUrgent
+            ? 'rgba(239,68,68,0.06)'
+            : 'transparent',
+        border: isActive
+          ? '1px solid var(--accent)'
+          : isUrgent
+            ? '1px solid rgba(239,68,68,0.3)'
+            : '1px solid transparent',
+        boxShadow: isActive
+          ? '0 8px 24px rgba(212, 175, 55, 0.15)'
+          : isUrgent
+            ? '0 4px 16px rgba(239,68,68,0.12)'
+            : 'none',
         transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
         position: 'relative',
         overflow: 'hidden',
@@ -65,13 +89,18 @@ export function ConversationItem({ conversation: c, isActive, onClick }: { conve
       onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--surface-2)'; }}
       onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
     >
-      {/* Indicador Lateral de Seleção */}
-      {isActive && (
+      {/* Indicador Lateral de Seleção ou Urgência */}
+      {isActive ? (
         <div style={{
           position: 'absolute', left: 0, top: 0, bottom: 0, width: 4,
           background: 'var(--accent)', boxShadow: '0 0 12px var(--accent)'
         }} />
-      )}
+      ) : isUrgent ? (
+        <div style={{
+          position: 'absolute', left: 0, top: 0, bottom: 0, width: 4,
+          background: '#ef4444', boxShadow: '0 0 10px rgba(239,68,68,0.6)'
+        }} />
+      ) : null}
 
       {/* Avatar */}
       <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -123,6 +152,20 @@ export function ConversationItem({ conversation: c, isActive, onClick }: { conve
                 fontSize: 9, padding: '1px 5px', borderRadius: 4,
                 background: 'rgba(14,165,233,0.15)', color: '#38bdf8', fontWeight: 700,
               }}>GRUPO</span>
+            )}
+
+            {/* Urgente badge */}
+            {isUrgent && (
+              <span
+                title={urgentReason ? (PRIORITY_REASON_LABEL[urgentReason] || urgentReason) : 'Prioridade altíssima'}
+                style={{
+                  fontSize: 9, padding: '1px 6px', borderRadius: 4,
+                  background: 'rgba(239,68,68,0.15)', color: '#f87171', fontWeight: 800,
+                  display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0,
+                }}
+              >
+                <AlertTriangle size={9} /> URGENTE
+              </span>
             )}
           </div>
           <span style={{ fontSize: 10, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>

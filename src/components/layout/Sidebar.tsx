@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { MessageSquare, BookOpen, FileCheck, BarChart3, Settings, X, Users, Zap, LogOut, RefreshCw, Loader } from 'lucide-react';
+import { MessageSquare, BookOpen, FileCheck, BarChart3, Settings, X, Users, Zap, LogOut, RefreshCw, Loader, GraduationCap } from 'lucide-react';
 import { useDashboardStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 
@@ -8,6 +8,7 @@ const navItems = [
   { href: '/conversas', label: 'Conversas', icon: MessageSquare, badge: true },
   { href: '/clientes', label: 'Clientes', icon: Users },
   { href: '/conhecimento', label: 'Base de Conhecimento', icon: BookOpen },
+  { href: '/treinamento', label: 'Treinar IA', icon: GraduationCap },
   { href: '/comprovantes', label: 'Comprovantes', icon: FileCheck },
   { href: '/automacoes', label: 'Automações', icon: Zap },
   { href: '/metricas', label: 'Métricas', icon: BarChart3 },

@@ -4,6 +4,7 @@ import { ptBR } from 'date-fns/locale';
 import { motion } from 'framer-motion';
 import { FileText, Check, CheckCheck, AlertCircle, Clock, Reply, Copy, ChevronDown, CreditCard, Image } from 'lucide-react';
 import type { Message } from '@/lib/mock-data';
+import { AudioPlayer } from './AudioPlayer';
 
 function StatusIcon({ status }: { status?: Message['status'] }) {
   if (!status) return null;
@@ -60,16 +61,21 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
   
   const contentLower = (m.content || '').toLowerCase();
   const isMediaOnly = [
-    '[midia]', '[mídia]', '[sticker]', '[audio]', '[áudio]', '[video]', '[vídeo]', '[mensagem]'
+    '[midia]', '[mídia]', '[sticker]', '[audio]', '[áudio]', '[video]', '[vídeo]', '[documento]'
   ].includes(contentLower);
+  const isUnparseable =
+    (contentLower === '[mensagem]' || contentLower === 'mensagem não suportada') &&
+    !m.mediaType && !m.mediaUrl;
 
-  const isVideo = m.mediaType === 'video' || 
-                 (m.mediaUrl && /\.(mp4|mov|webm|ogg|avi)$/i.test(m.mediaUrl));
-  const isAudio = m.mediaType === 'audio' || 
-                 (m.mediaUrl && /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(m.mediaUrl)) ||
-                 contentLower === '[audio]' || contentLower === '[áudio]';
-  const isImage = m.mediaType === 'image' || 
-                 (m.mediaUrl && /\.(jpg|jpeg|png|gif|webp)$/i.test(m.mediaUrl));
+  // mediaType do banco tem prioridade. Extensão só como fallback quando mediaType é null.
+  // .ogg do WhatsApp é quase sempre áudio (voice note) — só é vídeo se mediaType='video' explícito.
+  const isAudio = m.mediaType === 'audio' ||
+                 (!m.mediaType && m.mediaUrl && /\.(mp3|wav|ogg|m4a|aac|opus)$/i.test(m.mediaUrl)) ||
+                 (!m.mediaType && (contentLower === '[audio]' || contentLower === '[áudio]'));
+  const isVideo = !isAudio && (m.mediaType === 'video' ||
+                 (!m.mediaType && m.mediaUrl && /\.(mp4|mov|webm|avi)$/i.test(m.mediaUrl)));
+  const isImage = !isAudio && !isVideo && (m.mediaType === 'image' ||
+                 (!m.mediaType && m.mediaUrl && /\.(jpg|jpeg|png|gif|webp)$/i.test(m.mediaUrl)));
 
   const contextMenu = (
     <div ref={menuRef} style={{ position: 'relative', display: 'inline-flex' }}>
@@ -202,11 +208,11 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
 
             {/* Áudio */}
             {m.mediaUrl && isAudio && (
-              <div style={{ marginBottom: !isMediaOnly ? 8 : 0, minWidth: 240 }}>
-                <audio 
-                  src={m.mediaUrl} 
-                  controls 
-                  style={{ width: '100%', height: 40 }}
+              <div style={{ marginLeft: -6, marginRight: -6, marginTop: -2, marginBottom: -2 }}>
+                <AudioPlayer
+                  src={m.mediaUrl}
+                  accentColor={isClient ? 'var(--accent)' : isAI ? 'var(--accent)' : 'var(--emerald-light)'}
+                  isClient={isClient}
                 />
               </div>
             )}
@@ -245,10 +251,20 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
               </div>
             )}
 
-            {!isMediaOnly && m.content && m.content}
+            {!isMediaOnly && !isUnparseable && m.content && m.content}
+            {isUnparseable && (
+              <span style={{ fontStyle: 'italic', color: 'var(--fg-muted)', fontSize: 12 }}>
+                Mensagem não suportada
+              </span>
+            )}
             {isMediaOnly && !m.mediaUrl && (
               <span style={{ fontStyle: 'italic', color: 'var(--fg-muted)', fontSize: 13 }}>
                 {isAudio ? '🎵 Mensagem de áudio' : isVideo ? '🎥 Vídeo' : '📎 Arquivo de mídia (carregando...)'}
+              </span>
+            )}
+            {isMediaOnly && m.mediaUrl === 'FAILED' && (
+              <span style={{ fontStyle: 'italic', color: 'var(--red)', fontSize: 12 }}>
+                ⚠️ Mídia indisponível
               </span>
             )}
           </div>

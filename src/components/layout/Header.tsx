@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Bell, Menu, MessageSquare, AlertCircle, LogOut, Settings, Sun, Moon } from 'lucide-react';
 import { IAStatusPill } from './IAStatusPill';
+import { InstanceSwitcher } from './InstanceSwitcher';
 import { useDashboardStore } from '@/lib/store';
 
 const routeNames: Record<string, string> = {
@@ -88,6 +89,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
 
       {/* Right */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div className="hide-mobile"><InstanceSwitcher /></div>
         <div className="hide-mobile"><IAStatusPill /></div>
         <div ref={notifRef} style={{ position: 'relative' }}>
           <button 

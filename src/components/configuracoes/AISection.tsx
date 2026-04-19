@@ -4,6 +4,7 @@ import type { AISettings } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { useDashboardStore } from '@/lib/store';
 import { FieldGroup, TextInput, TextArea, SelectInput, Toggle, SectionTitle, SaveButton } from './SettingsField';
+import { RetrainingSection } from './RetrainingSection';
 
 interface AIConfig {
   enabled: boolean;
@@ -203,6 +204,8 @@ export function AISection({ data, onSave }: { data: AISettings; onSave: (d: AISe
       </FieldGroup>
 
       <SaveButton onClick={handleSave} saving={saving} />
+
+      <RetrainingSection instanceId={activeInstanceId} />
     </div>
   );
 }

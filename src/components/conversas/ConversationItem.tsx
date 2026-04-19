@@ -189,7 +189,7 @@ export function ConversationItem({ conversation: c, isActive, onClick }: { conve
             }}>
               {last ? (
                 <>
-                  {last.author === 'humano' || last.author === 'atendente' ? 'Você: ' : ''}
+                  {last.author === 'humano' ? 'Você: ' : ''}
                   {last.content}
                 </>
               ) : (

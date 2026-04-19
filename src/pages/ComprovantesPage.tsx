@@ -17,6 +17,14 @@ interface MediaAnalysis {
   type?: string | null;
   description?: string | null;
   confidence?: number;
+  payment_data?: {
+    value?: string | null;
+    payer_name?: string | null;
+    receiver_name?: string | null;
+    date?: string | null;
+    bank?: string | null;
+    transaction_id?: string | null;
+  } | null;
 }
 
 interface PaymentProof {
@@ -284,12 +292,12 @@ export default function ComprovantesPage() {
               {(() => {
                 const a = selected.media_analysis;
                 const fields = [
-                  { label: 'Valor', value: a?.payment_value, color: 'var(--emerald-light)', large: true },
-                  { label: 'Pagador', value: a?.payer_name },
-                  { label: 'Recebedor', value: a?.receiver_name },
-                  { label: 'Data', value: a?.date },
-                  { label: 'Banco', value: a?.bank },
-                  { label: 'ID Transação', value: a?.transaction_id, mono: true },
+                  { label: 'Valor', value: a?.payment_data?.value || a?.payment_value, color: 'var(--emerald-light)', large: true },
+                  { label: 'Pagador', value: a?.payment_data?.payer_name || a?.payer_name },
+                  { label: 'Recebedor', value: a?.payment_data?.receiver_name || a?.receiver_name },
+                  { label: 'Data', value: a?.payment_data?.date || a?.date },
+                  { label: 'Banco', value: a?.payment_data?.bank || a?.bank },
+                  { label: 'ID Transação', value: a?.payment_data?.transaction_id || a?.transaction_id, mono: true },
                 ].filter(f => f.value);
 
                 if (fields.length === 0) {

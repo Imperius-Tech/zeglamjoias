@@ -445,9 +445,10 @@ function ClientDetail({ conv, onOpenChat }: { conv: Conversation; onOpenChat: ()
 export default function ClientesPage() {
   const conversations = useDashboardStore((s) => s.conversations);
   const selectConversation = useDashboardStore((s) => s.selectConversation);
+  const searchQuery = useDashboardStore((s) => s.searchQuery);
+  const setSearchQuery = useDashboardStore((s) => s.setSearchQuery);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Auto-select client if ID is in URL
@@ -460,12 +461,12 @@ export default function ClientesPage() {
 
   const clients = useMemo(() => {
     let list = [...conversations].sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
       list = list.filter((c) => c.customerName.toLowerCase().includes(q) || c.customerPhone.includes(q));
     }
     return list;
-  }, [conversations, search]);
+  }, [conversations, searchQuery]);
 
   const selectedConv = selectedId ? conversations.find((c) => c.id === selectedId) : null;
 
@@ -483,7 +484,7 @@ export default function ClientesPage() {
           </div>
           <div style={{ position: 'relative' }}>
             <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-subtle)' }} />
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar cliente..."
+            <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Buscar cliente..."
               style={{ width: '100%', height: 36, paddingLeft: 36, paddingRight: 16, borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)', fontSize: 13, color: 'var(--fg-dim)', outline: 'none' }}
             />
           </div>

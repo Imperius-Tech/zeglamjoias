@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Manual de Uso - Zeglam Joias Dashboard</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px;
+        }
+        h1, h2, h3 {
+            color: #1a1a1a;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 10px;
+        }
+        h1 {
+            font-size: 2.5em;
+            text-align: center;
+            border-bottom: none;
+            margin-bottom: 5px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            font-size: 1.2em;
+            margin-bottom: 40px;
+        }
+        .section {
+            margin-bottom: 40px;
+            page-break-inside: avoid;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+        }
+        .image-placeholder {
+            background-color: #f8f9fa;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            color: #666;
+            margin: 20px 0;
+            font-style: italic;
+        }
+        .alert {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        ul, ol {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        .toc {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 40px;
+        }
+        .toc ul {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        .toc li {
+            margin-bottom: 10px;
+        }
+        .toc a {
+            color: #0056b3;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>ZEGLAM JOIAS</h1>
+    <div class="subtitle">Dashboard Administrativo & IA<br>Manual de Uso e Credenciais<br>Versão 1.0 | Abril 2026</div>
+
+    <div class="toc">
+        <h2>Sumário</h2>
+        <ul>
+            <li>1. Introdução</li>
+            <li>2. Acesso ao Sistema</li>
+            <li>3. Gestão de Clientes e Leads</li>
+            <li>4. Conversas & Histórico (Chat)</li>
+            <li>5. Métricas & Analytics</li>
+            <li>6. Configurações & Retreinamento da IA</li>
+            <li>7. Credenciais Administrativas</li>
+            <li>8. Como Conectar o WhatsApp (Evolution API)</li>
+            <li>9. Suporte e Problemas Comuns</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>1. Introdução</h2>
+        <p>Bem-vindo ao <strong>Zeglam Joias Dashboard</strong>! Este é um painel administrativo exclusivo, desenvolvido com tecnologia premium para o monitoramento e gestão em tempo real das vendas, atendimentos via WhatsApp e interações da Inteligência Artificial.</p>
+        <p>Com este sistema você pode:</p>
+        <ul>
+            <li>Monitorar o fluxo de mensagens e vendas em tempo real.</li>
+            <li>Visualizar e gerenciar clientes VIPs e Leads.</li>
+            <li>Acompanhar todas as conversas do WhatsApp com suporte a áudio, imagens e vídeos.</li>
+            <li>Pausar a IA e assumir o atendimento humano instantaneamente.</li>
+            <li>Analisar métricas detalhadas de conversão e produtos.</li>
+            <li>Realizar o retreinamento contínuo da IA com novas diretrizes de vendas.</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>2. Acesso ao Sistema</h2>
+        <p>Use as credenciais abaixo para acessar o painel de controle administrativo:</p>
+        <table>
+            <tr>
+                <th>Campo</th>
+                <th>Valor</th>
+            </tr>
+            <tr>
+                <td>URL</td>
+                <td><i>(Seu Domínio de Produção - ex: https://admin.zeglamjoias.com)</i></td>
+            </tr>
+            <tr>
+                <td>Email</td>
+                <td>admin@zeglam.com.br</td>
+            </tr>
+            <tr>
+                <td>Senha</td>
+                <td>Zeglam@2026</td>
+            </tr>
+        </table>
+        
+        <h3>Como Fazer Login</h3>
+        <ol>
+            <li>Abra seu navegador (recomendamos Chrome ou Edge).</li>
+            <li>Acesse a URL do Dashboard.</li>
+            <li>Digite seu email e senha administrativos.</li>
+            <li>Clique em 'Entrar'.</li>
+        </ol>
+        <div class="image-placeholder">[Imagem: Captura de tela da página de Login com design premium escuro]</div>
+    </div>
+
+    <div class="section">
+        <h2>3. Gestão de Clientes e Leads</h2>
+        <p>A página de Clientes permite organizar e visualizar todos os contatos que interagiram com a marca.</p>
+        
+        <h3>Informações da Tabela</h3>
+        <ul>
+            <li><strong>Nome / Telefone:</strong> Dados de contato do cliente.</li>
+            <li><strong>Status:</strong> Novo, Em Atendimento, Convertido, Frio.</li>
+            <li><strong>Categoria:</strong> VIP, Atacadista, Varejo.</li>
+            <li><strong>Última Interação:</strong> Data e hora da última mensagem.</li>
+        </ul>
+        
+        <h3>Ações</h3>
+        <ul>
+            <li><strong>Visualizar:</strong> Abre o perfil detalhado e o histórico de compras.</li>
+            <li><strong>Conversar:</strong> Redireciona diretamente para a tela de chat com o cliente.</li>
+        </ul>
+        <div class="image-placeholder">[Imagem: Tabela de Clientes com filtros de status e barra de pesquisa]</div>
+    </div>
+
+    <div class="section">
+        <h2>4. Conversas & Histórico (Chat)</h2>
+        <p>O coração do atendimento. Visualize e gerencie as conversas do WhatsApp em tempo real de forma sincronizada.</p>
+        
+        <h3>Layout da Tela</h3>
+        <ul>
+            <li><strong>Barra Lateral:</strong> Lista de todas as conversas ativas, ordenadas por mensagens não lidas ou por nível de urgência.</li>
+            <li><strong>Área de Chat:</strong> Histórico completo de mensagens, com suporte nativo à reprodução de áudios e visualização de fotos de joias enviadas pelo cliente.</li>
+        </ul>
+
+        <h3>Intervenção Humana (Assumir Atendimento)</h3>
+        <p>A qualquer momento, você pode <strong>Pausar a IA</strong> clicando no botão de pausa localizado no topo do chat. Enquanto estiver pausada, a IA não responderá ao cliente, permitindo que você envie mensagens manuais de fechamento de venda ou envio de catálogos exclusivos. Clique em "Retomar" para devolver o controle à IA.</p>
+        <div class="image-placeholder">[Imagem: Interface de Chat mostrando o botão de Pausar IA e balões de mensagens]</div>
+    </div>
+
+    <div class="section">
+        <h2>5. Métricas & Analytics</h2>
+        <p>Acompanhe o desempenho das vendas e métricas avançadas.</p>
+        
+        <h3>Métricas Principais</h3>
+        <ul>
+            <li>Análise de sentimento das conversas.</li>
+            <li>Desempenho da IA na conversão e retenção de leads.</li>
+            <li>Tempo de operação e volume de mensagens processadas pela Evolution API.</li>
+        </ul>
+        <div class="image-placeholder">[Imagem: Dashboard de Métricas com gráficos detalhados]</div>
+    </div>
+
+    <div class="section">
+        <h2>6. Configurações & Retreinamento da IA</h2>
+        <p>Na página de Configurações, você tem controle total sobre o comportamento do sistema e da IA.</p>
+        
+        <h3>Abas Principais</h3>
+        <ul>
+            <li><strong>Perfil:</strong> Ajustes da conta atual.</li>
+            <li><strong>IA e Comportamento:</strong> Define o tom de voz da IA (Luxuoso, Atencioso, Vendedor) e restrições.</li>
+            <li><strong>Retreinamento (Novo!):</strong> Permite enviar novos PDFs de catálogos, políticas de troca, ou instruções específicas diretamente para a IA aprender e aplicar imediatamente nos próximos atendimentos.</li>
+            <li><strong>Integrações:</strong> Status de conexão com Supabase e Evolution API.</li>
+        </ul>
+        <div class="image-placeholder">[Imagem: Tela de Configurações mostrando a seção de Retreinamento de IA com upload de arquivos]</div>
+    </div>
+
+    <div class="section">
+        <h2>7. Credenciais Administrativas</h2>
+        <p>Guarde estas informações em local seguro. Elas são vitais para a infraestrutura do sistema.</p>
+
+        <h3>7.1 Supabase (Banco de Dados e Autenticação)</h3>
+        <table>
+            <tr>
+                <th>Campo</th>
+                <th>Valor</th>
+            </tr>
+            <tr>
+                <td>URL</td>
+                <td>https://supabase.com/dashboard/project/qemstqozkrdnuxqovrty</td>
+            </tr>
+            <tr>
+                <td>Email</td>
+                <td>(Conta Google do administrador)</td>
+            </tr>
+            <tr>
+                <td>API URL</td>
+                <td>https://qemstqozkrdnuxqovrty.supabase.co</td>
+            </tr>
+        </table>
+
+        <h3>7.2 Evolution API (Conexão WhatsApp)</h3>
+        <table>
+            <tr>
+                <th>Campo</th>
+                <th>Valor</th>
+            </tr>
+            <tr>
+                <td>Manager URL</td>
+                <td>https://imperiustech-evolution-api.ow8uan.easypanel.host/manager</td>
+            </tr>
+            <tr>
+                <td>Server URL</td>
+                <td>https://imperiustech-evolution-api.ow8uan.easypanel.host</td>
+            </tr>
+            <tr>
+                <td>Global API Key</td>
+                <td>429683C4C977415CAAFCCE10F7D57E11</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>8. Como Conectar o WhatsApp (Evolution API)</h2>
+        <p>Se o WhatsApp da Zeglam Joias desconectar, siga este passo a passo:</p>
+        
+        <ol>
+            <li>Acesse o <strong>Evolution Manager</strong> (URL acima).</li>
+            <li>Faça login usando a Server URL e a Global API Key.</li>
+            <li>Localize a instância <strong>ZeglamJoias</strong> (ou o nome configurado).</li>
+            <li>Se o status estiver "Disconnected" (Vermelho), clique na instância.</li>
+            <li>Clique no botão verde <strong>"Get QR Code"</strong>.</li>
+            <li>Abra o WhatsApp do número oficial da Zeglam no seu celular.</li>
+            <li>Vá em <i>Configurações > Dispositivos conectados > Conectar dispositivo</i> e escaneie o código na tela.</li>
+            <li>O status mudará para "Connected" (Verde) e o sistema voltará a sincronizar as mensagens.</li>
+        </ol>
+        <div class="alert">
+            <strong>AVISO IMPORTANTE:</strong> Não desconecte o celular da internet para garantir o funcionamento contínuo (caso use WhatsApp padrão; se for WhatsApp Business Web em múltiplos aparelhos, siga as recomendações da Meta).
+        </div>
+        <div class="image-placeholder">[Imagem: Tela do Evolution Manager exibindo a instância conectada]</div>
+    </div>
+
+    <div class="section">
+        <h2>9. Suporte e Problemas Comuns</h2>
+        
+        <h3>Problemas Frequentes</h3>
+        <ul>
+            <li><strong>Mensagens não aparecem no chat:</strong> Atualize a página e verifique no Manager da Evolution API se o status da instância está "Connected".</li>
+            <li><strong>IA não responde:</strong> Verifique se a conversa não foi "Pausada" manualmente para intervenção humana. Se estiver ativa e não responder, verifique a cota da OpenAI ou a estabilidade do Edge Function (webhook).</li>
+            <li><strong>Erro no Retreinamento:</strong> Certifique-se de que os arquivos de contexto estão em formato texto ou PDF válidos e não excedem o limite de tamanho.</li>
+        </ul>
+
+        <h3>Contato para Suporte</h3>
+        <p>Este sistema foi desenvolvido de forma exclusiva com Padrões Elite.</p>
+        <table>
+            <tr>
+                <th>Campo</th>
+                <th>Valor</th>
+            </tr>
+            <tr>
+                <td>Empresa</td>
+                <td><strong>Imperius Tech</strong></td>
+            </tr>
+            <tr>
+                <td>Desenvolvedor(es)</td>
+                <td>Ronan Filho / Gustavo Santos</td>
+            </tr>
+            <tr>
+                <td>Contato</td>
+                <td>(Conforme registro contratual / WhatsApp corporativo)</td>
+            </tr>
+        </table>
+    </div>
+    
+    <div style="text-align: center; margin-top: 50px; color: #888; font-size: 0.9em;">
+        Zeglam Joias Dashboard IA © 2026 - Todos os direitos reservados.
+    </div>
+</body>
+</html>

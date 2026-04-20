@@ -1,516 +1,516 @@
-import { useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  MessageSquare, Users, Bot, User, Phone, TrendingUp, TrendingDown,
-  AlertCircle, UserPlus, CheckCircle2, Sparkles, Brain, RefreshCw, Loader,
-  Clock, Activity, Tag,
+  MessageSquare, Bot, Clock, AlertCircle, Loader, RefreshCw,
+  DollarSign, Activity, TrendingUp, Zap, UserCheck, FileCheck,
+  ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useDashboardStore } from '@/lib/store';
 
-interface MetricsData {
-  totals: {
-    conversations: number;
-    active_conversations: number;
-    messages: number;
-    messages_period: number;
-    messages_prev_period: number;
-    group_candidates_coletados: number;
-    group_candidates_adicionadas: number;
-    group_candidates_coletando: number;
-  };
-  by_author: Record<string, number>;
-  by_sent_by: Record<string, number>;
-  by_status: Record<string, number>;
-  by_conversation_type: Record<string, number>;
-  by_priority: Record<string, number>;
-  daily_volume: { date: string; total: number; cliente: number; humano: number; ia: number }[];
-  top_interests: { tag: string; count: number }[];
-  training_examples: {
-    total: number;
-    high_signal: number;
-    phone_reply: number;
-    dashboard_edit: number;
-    sync_pair: number;
-  };
-  response_coverage: {
-    with_human_reply: number;
-    without_reply: number;
-  };
+interface SLAData {
+  total_respondidas: number;
+  respondidas_1h: number;
+  respondidas_4h: number;
+  respondidas_24h: number;
+  respondidas_mais_24h: number;
+  nao_respondidas: number;
+  tempo_medio_minutos: number | null;
+  tempo_mediano_minutos: number | null;
 }
 
-const periodOptions: { value: number; label: string }[] = [
+interface AIEfficiencyData {
+  msgs_ia_auto: number;
+  msgs_humano: number;
+  msgs_sugestao_aprovada: number;
+  total_msgs_saida: number;
+  taxa_automacao: number;
+  confianca_media: number | null;
+  consultas_humano_count: Record<string, number> | null;
+  horas_economizadas: number;
+}
+
+interface PaymentsData {
+  total_comprovantes: number;
+  com_valor_detectado: number;
+  total_valor: number;
+  ticket_medio: number;
+  pendentes: number;
+  por_dia: { dia: string; qtd: number; total: number }[] | null;
+}
+
+interface BacklogConv {
+  id: string;
+  customer_name: string;
+  customer_phone: string;
+  hours: number;
+}
+
+interface BacklogItem {
+  motivo: string;
+  total: number;
+  mais_antigo_horas: number;
+  conversations: BacklogConv[] | null;
+}
+
+interface UrgentAging {
+  conversation_id: string;
+  customer_name: string;
+  priority_reason: string | null;
+  ai_reason: string | null;
+  hours_waiting: number;
+}
+
+const periodOptions = [
   { value: 7, label: '7 dias' },
   { value: 30, label: '30 dias' },
   { value: 90, label: '90 dias' },
-  { value: 365, label: '1 ano' },
 ];
 
-export default function MetricasPage() {
-  const [data, setData] = useState<MetricsData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [period, setPeriod] = useState(30);
-  const [refreshing, setRefreshing] = useState(false);
+const MOTIVO_LABEL: Record<string, string> = {
+  rastreio: 'Rastreio',
+  confirmacao_pagamento: 'Confirmar pagamento',
+  reclamacao: 'Reclamação',
+  frete_envio: 'Frete/envio',
+  valor_desconto: 'Valor/desconto',
+  status_pedido: 'Status do pedido',
+  alteracao_cancelamento: 'Alterar/cancelar',
+  grupo_inclusao: 'Entrar no grupo',
+  link_pedido: 'Link/pedido',
+  outro: 'Outro',
+};
 
-  const loadData = async (silent = false) => {
-    if (!silent) setLoading(true);
+function formatTime(minutes: number | null): string {
+  if (minutes == null) return '—';
+  if (minutes < 60) return `${Math.round(minutes)} min`;
+  const hours = minutes / 60;
+  if (hours < 24) return `${hours.toFixed(1)} h`;
+  return `${(hours / 24).toFixed(1)} dias`;
+}
+
+function formatCurrency(v: number): string {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+}
+
+export default function MetricasPage() {
+  const navigate = useNavigate();
+  const selectConversation = useDashboardStore((s) => s.selectConversation);
+  const activeInstanceId = useDashboardStore((s) => s.activeInstanceId);
+  const [period, setPeriod] = useState(30);
+  const [expandedBacklog, setExpandedBacklog] = useState<string | null>('confirmacao_pagamento');
+
+  const openConversation = (convId: string) => {
+    selectConversation(convId);
+    navigate('/conversas');
+  };
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [sla, setSLA] = useState<SLAData | null>(null);
+  const [ai, setAI] = useState<AIEfficiencyData | null>(null);
+  const [payments, setPayments] = useState<PaymentsData | null>(null);
+  const [backlog, setBacklog] = useState<BacklogItem[]>([]);
+  const [aging, setAging] = useState<UrgentAging[]>([]);
+
+  const loadData = useCallback(async () => {
+    if (!activeInstanceId) return;
     setRefreshing(true);
     setError(null);
     try {
-      const { data: res, error: err } = await supabase.rpc('metrics_overview', { days_back: period });
-      if (err) throw err;
-      setData(res as MetricsData);
+      const [slaRes, aiRes, paymentsRes, backlogRes, agingRes] = await Promise.all([
+        supabase.rpc('metrics_sla', { p_instance_id: activeInstanceId, p_days: period }),
+        supabase.rpc('metrics_ai_efficiency', { p_instance_id: activeInstanceId, p_days: period }),
+        supabase.rpc('metrics_payments', { p_instance_id: activeInstanceId, p_days: period }),
+        supabase.rpc('metrics_backlog', { p_instance_id: activeInstanceId }),
+        supabase.rpc('metrics_urgent_aging', { p_instance_id: activeInstanceId }),
+      ]);
+      if (slaRes.data?.[0]) setSLA(slaRes.data[0]);
+      if (aiRes.data?.[0]) setAI(aiRes.data[0]);
+      if (paymentsRes.data?.[0]) setPayments(paymentsRes.data[0]);
+      setBacklog(backlogRes.data || []);
+      setAging(agingRes.data || []);
     } catch (e: any) {
       setError(e.message || 'Erro ao carregar métricas');
     }
     setLoading(false);
     setRefreshing(false);
-  };
+  }, [activeInstanceId, period]);
 
-  useEffect(() => { loadData(); }, [period]);
+  useEffect(() => { void loadData(); }, [loadData]);
 
   if (loading) {
     return (
-      <div style={{ padding: '32px 36px', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-        <Loader size={24} style={{ color: 'var(--accent)', animation: 'spin 1s linear infinite' }} />
+      <div style={{ padding: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', overflowY: 'auto' }}>
+        <Loader size={24} className="spin" style={{ color: 'var(--accent)' }} />
       </div>
     );
   }
 
-  if (error || !data) {
+  if (error) {
     return (
-      <div style={{ padding: '32px 36px' }}>
-        <div style={{ padding: 20, borderRadius: 12, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: '#fca5a5' }}>
-          {error || 'Dados indisponíveis'}
-        </div>
+      <div style={{ padding: 32, color: '#ef4444', height: '100%', overflowY: 'auto' }}>
+        <AlertCircle size={20} /> {error}
       </div>
     );
   }
+
+  const slaTotal = sla ? sla.total_respondidas + sla.nao_respondidas : 0;
+  const slaPct1h = sla && slaTotal > 0 ? (sla.respondidas_1h / slaTotal) * 100 : 0;
 
   return (
-    <div style={{ padding: '32px 36px', height: '100%', overflowY: 'auto' }}>
+    <div style={{ height: '100%', overflowY: 'auto', padding: '24px 32px' }}>
+      <div style={{ maxWidth: 1400, margin: '0 auto' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28, flexWrap: 'wrap', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.3em' }}>
-              Zeglam
-            </span>
-            <span style={{ color: 'var(--fg-subtle)' }}>/</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-dim)' }}>Métricas</span>
-          </div>
-          <h1 style={{ fontSize: 32, fontWeight: 900, letterSpacing: '-0.025em', color: 'var(--strong-text)', marginBottom: 6 }}>
-            MÉTRICAS
-          </h1>
-          <p style={{ fontSize: 14, color: 'var(--fg-muted)' }}>
-            Indicadores de atendimento, aprendizado da IA e entrada no grupo.
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: 'var(--strong-text)', margin: 0 }}>Métricas</h1>
+          <p style={{ fontSize: 13, color: 'var(--fg-subtle)', margin: '4px 0 0' }}>
+            Acompanhe atendimento, eficiência da IA e pagamentos
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 4, background: 'var(--glass)', padding: 4, borderRadius: 10, border: '1px solid var(--border)' }}>
-            {periodOptions.map((p) => (
-              <button
-                key={p.value}
-                onClick={() => setPeriod(p.value)}
-                style={{
-                  padding: '6px 12px', borderRadius: 6, cursor: 'pointer',
-                  fontSize: 12, fontWeight: 600,
-                  background: period === p.value ? 'var(--accent-bg)' : 'transparent',
-                  color: period === p.value ? 'var(--accent)' : 'var(--fg-muted)',
-                  border: 'none',
-                }}
-              >{p.label}</button>
-            ))}
-          </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {periodOptions.map((p) => (
+            <button
+              key={p.value}
+              onClick={() => setPeriod(p.value)}
+              style={{
+                padding: '6px 14px', borderRadius: 10, fontSize: 12, fontWeight: 600,
+                background: period === p.value ? 'var(--accent)' : 'var(--glass)',
+                color: period === p.value ? '#fff' : 'var(--fg-muted)',
+                border: `1px solid ${period === p.value ? 'var(--accent)' : 'var(--border)'}`,
+                cursor: 'pointer',
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
           <button
-            onClick={() => loadData(true)}
+            onClick={() => void loadData()}
             disabled={refreshing}
-            title="Atualizar"
             style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '8px 12px', borderRadius: 10, cursor: refreshing ? 'wait' : 'pointer',
-              background: 'var(--glass)', border: '1px solid var(--border)',
-              color: 'var(--fg-muted)', fontSize: 12,
+              padding: 8, borderRadius: 10, background: 'var(--glass)',
+              border: '1px solid var(--border)', cursor: refreshing ? 'wait' : 'pointer',
+              color: 'var(--fg-muted)',
             }}
           >
-            {refreshing
-              ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} />
-              : <RefreshCw size={12} />}
+            <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
           </button>
         </div>
       </div>
 
-      {/* KPIs principais */}
-      <Section title="Visão geral">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
-          <KpiCard
-            icon={MessageSquare}
-            label="Total de conversas"
-            value={data.totals.conversations}
-            sub={`${data.totals.active_conversations} ativas em ${period}d`}
-            color="var(--accent)"
-          />
-          <KpiCard
-            icon={Activity}
-            label={`Mensagens (${period}d)`}
-            value={data.totals.messages_period}
-            delta={pctDelta(data.totals.messages_period, data.totals.messages_prev_period)}
-            color="#60a5fa"
-          />
-          <KpiCard
-            icon={UserPlus}
-            label="Leads para o grupo"
-            value={data.totals.group_candidates_coletados + data.totals.group_candidates_coletando}
-            sub={`${data.totals.group_candidates_adicionadas} já adicionados`}
-            color="var(--emerald-light)"
-          />
-          <KpiCard
-            icon={AlertCircle}
-            label="Sem resposta"
-            value={data.response_coverage.without_reply}
-            sub={`em ${period} dias`}
-            color={data.response_coverage.without_reply > 0 ? '#fbbf24' : 'var(--fg-subtle)'}
-          />
-        </div>
-      </Section>
+      {/* ============ ATENDIMENTO ============ */}
+      <section style={{ marginBottom: 32 }}>
+        <h2 style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>
+          Atendimento
+        </h2>
 
-      {/* Autoria das mensagens */}
-      <Section title="De onde vêm as respostas">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Card title="Mensagens por autor">
-            <StackBar
-              items={[
-                { label: 'Cliente', value: data.by_author.cliente || 0, color: '#94a3b8' },
-                { label: 'Zevaldo (humano)', value: data.by_author.humano || 0, color: 'var(--emerald-light)' },
-                { label: 'IA', value: data.by_author.ia || 0, color: 'var(--accent)' },
-              ]}
-              total={(data.by_author.cliente || 0) + (data.by_author.humano || 0) + (data.by_author.ia || 0)}
-            />
-          </Card>
-          <Card title="Canal das respostas do Zevaldo">
-            <StackBar
-              items={[
-                { label: 'Celular (direto)', value: data.by_sent_by.phone || 0, color: '#60a5fa', icon: Phone },
-                { label: 'Dashboard', value: data.by_sent_by.panel || 0, color: '#a78bfa', icon: User },
-                { label: 'IA enviou', value: data.by_sent_by.ai || 0, color: 'var(--accent)', icon: Bot },
-              ]}
-              total={(data.by_sent_by.phone || 0) + (data.by_sent_by.panel || 0) + (data.by_sent_by.ai || 0)}
-            />
-          </Card>
-        </div>
-      </Section>
-
-      {/* Volume diário */}
-      <Section title={`Volume diário — últimos ${period} dias`}>
-        <Card>
-          <DailyChart data={data.daily_volume} />
-        </Card>
-      </Section>
-
-      {/* Entrada no grupo */}
-      <Section title="Fluxo de entrada no grupo">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-          <FunnelCard
-            icon={UserPlus}
-            label="Coletando dados"
-            value={data.totals.group_candidates_coletando}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginBottom: 16 }}>
+          <KPI
+            icon={Clock}
+            label="Tempo médio de resposta"
+            value={formatTime(sla?.tempo_medio_minutos || null)}
+            subLabel={`Mediana: ${formatTime(sla?.tempo_mediano_minutos || null)}`}
             color="#fbbf24"
           />
-          <FunnelCard
-            icon={CheckCircle2}
-            label="Prontos p/ adicionar"
-            value={data.totals.group_candidates_coletados}
-            color="var(--emerald-light)"
+          <KPI
+            icon={Zap}
+            label="Respondidas em <1h"
+            value={`${slaPct1h.toFixed(0)}%`}
+            subLabel={`${sla?.respondidas_1h || 0} de ${slaTotal}`}
+            color="#10b981"
           />
-          <FunnelCard
-            icon={Users}
-            label="Já no grupo"
-            value={data.totals.group_candidates_adicionadas}
-            color="#60a5fa"
+          <KPI
+            icon={AlertCircle}
+            label="Não respondidas"
+            value={String(sla?.nao_respondidas || 0)}
+            subLabel="Clientes aguardando"
+            color="#ef4444"
+          />
+          <KPI
+            icon={UserCheck}
+            label="Respondidas >24h"
+            value={String(sla?.respondidas_mais_24h || 0)}
+            subLabel="SLA comprometido"
+            color="#f59e0b"
           />
         </div>
-      </Section>
 
-      {/* Aprendizado IA */}
-      <Section title="Aprendizado da IA">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Card title="Exemplos de treinamento">
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 14 }}>
-              <span style={{ fontSize: 32, fontWeight: 900, color: 'var(--strong-text)', letterSpacing: '-0.03em' }}>
-                {data.training_examples.total}
-              </span>
-              <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>exemplos · {data.training_examples.high_signal} alta-sinal</span>
-            </div>
-            <StackBar
-              items={[
-                { label: 'Resposta pelo celular', value: data.training_examples.phone_reply, color: '#60a5fa' },
-                { label: 'Edição no dashboard', value: data.training_examples.dashboard_edit, color: 'var(--accent)' },
-                { label: 'Pares do histórico', value: data.training_examples.sync_pair, color: '#a78bfa' },
+        {/* SLA distribution bar */}
+        {sla && sla.total_respondidas > 0 && (
+          <div style={{ padding: 16, borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)' }}>
+            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--strong-text)', margin: 0, marginBottom: 10 }}>
+              Distribuição por tempo de resposta
+            </p>
+            <SLABar
+              total={sla.total_respondidas}
+              buckets={[
+                { label: '< 1h', count: sla.respondidas_1h, color: '#10b981' },
+                { label: '1-4h', count: sla.respondidas_4h, color: '#84cc16' },
+                { label: '4-24h', count: sla.respondidas_24h, color: '#f59e0b' },
+                { label: '> 24h', count: sla.respondidas_mais_24h, color: '#ef4444' },
               ]}
-              total={data.training_examples.total}
-              emptyMessage="Ainda não há exemplos suficientes. A IA aprende automaticamente quando você responde pelo celular ou edita sugestões."
             />
-          </Card>
-          <Card title="Tipos de conversa (classificação IA)">
-            <StackBar
-              items={[
-                { label: 'Negócio', value: data.by_conversation_type.business || 0, color: 'var(--emerald-light)' },
-                { label: 'Pessoal', value: data.by_conversation_type.personal || 0, color: '#a78bfa' },
-                { label: 'Sem classificação', value: data.by_conversation_type.unknown || 0, color: '#94a3b8' },
-              ]}
-              total={Object.values(data.by_conversation_type).reduce((a, b) => a + b, 0)}
-            />
-          </Card>
-        </div>
-      </Section>
-
-      {/* Status + Prioridade */}
-      <Section title="Status das conversas">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Card title="Por status">
-            <StackBar
-              items={[
-                { label: 'IA respondendo', value: data.by_status.ia_respondendo || 0, color: 'var(--emerald-light)' },
-                { label: 'Aguardando humano', value: data.by_status.aguardando_humano || 0, color: '#fbbf24' },
-                { label: 'Silenciada', value: data.by_status.silenciada || 0, color: '#f87171' },
-                { label: 'Encerrada', value: data.by_status.encerrada || 0, color: '#94a3b8' },
-              ]}
-              total={Object.values(data.by_status).reduce((a, b) => a + b, 0)}
-            />
-          </Card>
-          <Card title="Por prioridade (análise IA)">
-            <StackBar
-              items={[
-                { label: 'Alta', value: data.by_priority.alta || 0, color: '#f87171' },
-                { label: 'Média', value: data.by_priority.media || 0, color: '#fbbf24' },
-                { label: 'Baixa', value: data.by_priority.baixa || 0, color: '#94a3b8' },
-                { label: 'Sem análise', value: data.by_priority.sem_analise || 0, color: 'var(--fg-subtle)' },
-              ]}
-              total={Object.values(data.by_priority).reduce((a, b) => a + b, 0)}
-            />
-          </Card>
-        </div>
-      </Section>
-
-      {/* Interesses */}
-      {data.top_interests.length > 0 && (
-        <Section title="Interesses mais frequentes">
-          <Card>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {data.top_interests.map((t, i) => (
-                <div key={i} style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '6px 12px', borderRadius: 20,
-                  background: 'rgba(212,175,55,0.1)',
-                  border: '1px solid rgba(212,175,55,0.25)',
-                }}>
-                  <Tag size={11} style={{ color: 'var(--accent)' }} />
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-dim)' }}>{t.tag}</span>
-                  <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700 }}>{t.count}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </Section>
-      )}
-    </div>
-  );
-}
-
-function pctDelta(curr: number, prev: number): number | null {
-  if (prev === 0) return curr > 0 ? 100 : null;
-  return Math.round(((curr - prev) / prev) * 100);
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ marginBottom: 28 }}>
-      <h2 style={{ fontSize: 12, fontWeight: 800, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>
-        {title}
-      </h2>
-      {children}
-    </div>
-  );
-}
-
-function Card({ title, children }: { title?: string; children: React.ReactNode }) {
-  return (
-    <div style={{ padding: 18, borderRadius: 14, background: 'var(--glass)', border: '1px solid var(--border)' }}>
-      {title && <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-muted)', marginBottom: 14 }}>{title}</p>}
-      {children}
-    </div>
-  );
-}
-
-function KpiCard({ icon: Icon, label, value, sub, delta, color }: {
-  icon: typeof MessageSquare; label: string; value: number; sub?: string; delta?: number | null; color: string;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-      style={{ padding: 16, borderRadius: 14, background: 'var(--glass)', border: '1px solid var(--border)' }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: 10,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: `${color}20`, border: `1px solid ${color}35`,
-        }}>
-          <Icon size={16} style={{ color }} />
-        </div>
-        {delta !== undefined && delta !== null && (
-          <span style={{
-            display: 'flex', alignItems: 'center', gap: 3,
-            fontSize: 11, fontWeight: 700,
-            padding: '2px 7px', borderRadius: 5,
-            background: delta >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-            color: delta >= 0 ? 'var(--emerald-light)' : '#fca5a5',
-          }}>
-            {delta >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-            {Math.abs(delta)}%
-          </span>
+          </div>
         )}
+      </section>
+
+      {/* ============ EFICIÊNCIA DA IA ============ */}
+      <section style={{ marginBottom: 32 }}>
+        <h2 style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>
+          Eficiência da IA
+        </h2>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginBottom: 16 }}>
+          <KPI
+            icon={Bot}
+            label="Taxa de automação"
+            value={`${ai?.taxa_automacao || 0}%`}
+            subLabel={`${ai?.msgs_ia_auto || 0} de ${ai?.total_msgs_saida || 0} msgs`}
+            color="var(--accent)"
+          />
+          <KPI
+            icon={Activity}
+            label="Confiança média"
+            value={ai?.confianca_media ? `${ai.confianca_media}%` : '—'}
+            subLabel="Das sugestões IA"
+            color="#8b5cf6"
+          />
+          <KPI
+            icon={Clock}
+            label="Horas economizadas"
+            value={`${ai?.horas_economizadas || 0}h`}
+            subLabel="Estimativa período"
+            color="#10b981"
+          />
+          <KPI
+            icon={MessageSquare}
+            label="Msgs manuais"
+            value={String(ai?.msgs_humano || 0)}
+            subLabel="Escritas pelo Zevaldo"
+            color="var(--fg-muted)"
+          />
+        </div>
+
+        {/* Top motivos CONSULTA_HUMANO */}
+        {ai?.consultas_humano_count && Object.keys(ai.consultas_humano_count).length > 0 && (
+          <div style={{ padding: 16, borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)' }}>
+            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--strong-text)', margin: 0, marginBottom: 10 }}>
+              Principais motivos de escalação pro humano
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+              {Object.entries(ai.consultas_humano_count)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8)
+                .map(([key, count]) => (
+                  <div key={key} style={{
+                    padding: '8px 12px', borderRadius: 8, background: 'var(--surface-2)',
+                    border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  }}>
+                    <span style={{ fontSize: 11, color: 'var(--fg-dim)' }}>
+                      {MOTIVO_LABEL[key] || key}
+                    </span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent)' }}>{count}</span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ============ PAGAMENTOS ============ */}
+      <section style={{ marginBottom: 32 }}>
+        <h2 style={{ fontSize: 12, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>
+          Pagamentos
+        </h2>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginBottom: 16 }}>
+          <KPI
+            icon={FileCheck}
+            label="Comprovantes recebidos"
+            value={String(payments?.total_comprovantes || 0)}
+            subLabel={`${payments?.pendentes || 0} pendentes`}
+            color="#10b981"
+          />
+          <KPI
+            icon={DollarSign}
+            label="Valor total detectado"
+            value={formatCurrency(payments?.total_valor || 0)}
+            subLabel={`${payments?.com_valor_detectado || 0} com valor lido`}
+            color="#10b981"
+          />
+          <KPI
+            icon={TrendingUp}
+            label="Ticket médio"
+            value={formatCurrency(payments?.ticket_medio || 0)}
+            subLabel="Por comprovante"
+            color="#10b981"
+          />
+        </div>
+      </section>
+
+      {/* ============ BACKLOG ============ */}
+      {backlog.length > 0 && (
+        <section style={{ marginBottom: 32 }}>
+          <h2 style={{ fontSize: 12, fontWeight: 700, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>
+            Backlog — aguardando humano
+          </h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {backlog.map((b) => {
+              const isExpanded = expandedBacklog === b.motivo;
+              const convs = b.conversations || [];
+              return (
+                <div key={b.motivo} style={{
+                  borderRadius: 12, background: 'var(--glass)',
+                  border: '1px solid rgba(239,68,68,0.2)', overflow: 'hidden',
+                }}>
+                  <button
+                    onClick={() => setExpandedBacklog(isExpanded ? null : b.motivo)}
+                    style={{
+                      width: '100%', padding: 14, background: 'transparent', border: 'none',
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left',
+                    }}
+                  >
+                    {isExpanded ? <ChevronDown size={16} style={{ color: '#ef4444', flexShrink: 0 }} /> : <ChevronRight size={16} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />}
+                    <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--strong-text)', minWidth: 40 }}>{b.total}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', flex: 1 }}>
+                      {MOTIVO_LABEL[b.motivo] || b.motivo}
+                    </span>
+                    <span style={{
+                      fontSize: 11, fontWeight: 600,
+                      color: b.mais_antigo_horas > 24 ? '#ef4444' : 'var(--fg-subtle)',
+                      padding: '3px 8px', borderRadius: 6,
+                      background: b.mais_antigo_horas > 24 ? 'rgba(239,68,68,0.1)' : 'var(--surface-2)',
+                    }}>
+                      Mais antigo: {b.mais_antigo_horas}h
+                    </span>
+                  </button>
+                  {isExpanded && convs.length > 0 && (
+                    <div style={{ borderTop: '1px solid var(--border)', background: 'var(--surface)' }}>
+                      {convs.map((c) => (
+                        <button
+                          key={c.id}
+                          onClick={() => openConversation(c.id)}
+                          style={{
+                            width: '100%', padding: '10px 16px 10px 46px', background: 'transparent',
+                            border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                            transition: 'background 0.15s',
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                        >
+                          <span style={{
+                            fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 6,
+                            background: c.hours > 24 ? '#ef4444' : 'rgba(239,68,68,0.15)',
+                            color: c.hours > 24 ? '#fff' : '#f87171',
+                            minWidth: 60, textAlign: 'center', flexShrink: 0,
+                          }}>
+                            {c.hours < 1 ? `${Math.round(c.hours * 60)}min` : `${c.hours}h`}
+                          </span>
+                          <span style={{ fontSize: 13, color: 'var(--fg-dim)', fontWeight: 600, flex: 1, minWidth: 0, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                            {c.customer_name}
+                          </span>
+                          <span style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>Abrir →</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* ============ URGENTES POR TEMPO ============ */}
+      {aging.length > 0 && (
+        <section style={{ marginBottom: 32 }}>
+          <h2 style={{ fontSize: 12, fontWeight: 700, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>
+            Urgentes há mais tempo esperando
+          </h2>
+          <div style={{ borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)', overflow: 'hidden' }}>
+            {aging.slice(0, 10).map((a, i) => (
+              <button
+                key={a.conversation_id}
+                onClick={() => openConversation(a.conversation_id)}
+                style={{
+                  width: '100%', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12,
+                  borderBottom: i < aging.length - 1 ? '1px solid var(--border)' : 'none',
+                  background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <span style={{
+                  fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 6,
+                  background: a.hours_waiting > 24 ? '#ef4444' : 'rgba(239,68,68,0.15)',
+                  color: a.hours_waiting > 24 ? '#fff' : '#f87171',
+                  minWidth: 70, textAlign: 'center', flexShrink: 0,
+                }}>
+                  {a.hours_waiting < 1 ? `${Math.round(a.hours_waiting * 60)}min` : `${a.hours_waiting}h`}
+                </span>
+                <span style={{ fontSize: 13, color: 'var(--fg-dim)', fontWeight: 600, flex: 1, minWidth: 0, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                  {a.customer_name}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--fg-subtle)', flex: 2, minWidth: 0, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                  {MOTIVO_LABEL[a.priority_reason || ''] || a.priority_reason || a.ai_reason || '—'}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--fg-subtle)', flexShrink: 0 }}>Abrir →</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <style>{`.spin { animation: spin 1s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
-      <p style={{ fontSize: 28, fontWeight: 900, color: 'var(--strong-text)', letterSpacing: '-0.03em', lineHeight: 1 }}>
-        {value.toLocaleString('pt-BR')}
-      </p>
-      <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)', marginTop: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-        {label}
-      </p>
-      {sub && <p style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 2 }}>{sub}</p>}
-    </motion.div>
+    </div>
   );
 }
 
-function FunnelCard({ icon: Icon, label, value, color }: {
-  icon: typeof UserPlus; label: string; value: number; color: string;
+function KPI({ icon: Icon, label, value, subLabel, color }: {
+  icon: any; label: string; value: string; subLabel?: string; color: string;
 }) {
   return (
     <div style={{
-      padding: 16, borderRadius: 14,
-      background: 'var(--glass)', border: `1px solid ${color}35`,
-      display: 'flex', alignItems: 'center', gap: 14,
+      padding: 16, borderRadius: 12, background: 'var(--glass)',
+      border: '1px solid var(--border)',
     }}>
-      <div style={{
-        width: 44, height: 44, borderRadius: 12,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: `${color}20`, border: `1px solid ${color}35`,
-      }}>
-        <Icon size={18} style={{ color }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Icon size={14} style={{ color }} />
+        <span style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          {label}
+        </span>
       </div>
-      <div>
-        <p style={{ fontSize: 28, fontWeight: 900, color, letterSpacing: '-0.03em', lineHeight: 1 }}>{value}</p>
-        <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-muted)', marginTop: 4 }}>{label}</p>
-      </div>
+      <p style={{ fontSize: 24, fontWeight: 800, color: 'var(--strong-text)', margin: '0 0 2px' }}>{value}</p>
+      {subLabel && <p style={{ fontSize: 11, color: 'var(--fg-subtle)', margin: 0 }}>{subLabel}</p>}
     </div>
   );
 }
 
-function StackBar({ items, total, emptyMessage }: {
-  items: { label: string; value: number; color: string; icon?: any }[];
-  total: number;
-  emptyMessage?: string;
-}) {
-  if (total === 0) {
-    return (
-      <p style={{ fontSize: 12, color: 'var(--fg-subtle)', fontStyle: 'italic', padding: '8px 0' }}>
-        {emptyMessage || 'Sem dados no período'}
-      </p>
-    );
-  }
+function SLABar({ total, buckets }: { total: number; buckets: { label: string; count: number; color: string }[] }) {
   return (
-    <div>
-      {/* Barra */}
-      <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', marginBottom: 12, background: 'var(--surface-3)' }}>
-        {items.map((it, i) => {
-          const pct = total > 0 ? (it.value / total) * 100 : 0;
+    <>
+      <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', marginBottom: 8 }}>
+        {buckets.map((b) => {
+          const pct = total > 0 ? (b.count / total) * 100 : 0;
           if (pct === 0) return null;
           return (
-            <div key={i} style={{ width: `${pct}%`, background: it.color }} title={`${it.label}: ${it.value} (${pct.toFixed(1)}%)`} />
+            <div key={b.label} style={{ width: `${pct}%`, background: b.color }} title={`${b.label}: ${b.count} (${pct.toFixed(1)}%)`} />
           );
         })}
       </div>
-      {/* Legenda */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {items.map((it, i) => {
-          const pct = total > 0 ? (it.value / total) * 100 : 0;
-          return (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 3, background: it.color, flexShrink: 0 }} />
-              <span style={{ flex: 1, color: 'var(--fg-dim)' }}>{it.label}</span>
-              <span style={{ fontWeight: 700, color: 'var(--strong-text)' }}>{it.value.toLocaleString('pt-BR')}</span>
-              <span style={{ color: 'var(--fg-subtle)', fontSize: 10, minWidth: 42, textAlign: 'right' }}>{pct.toFixed(1)}%</span>
-            </div>
-          );
-        })}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        {buckets.map((b) => (
+          <div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: b.color }} />
+            <span style={{ color: 'var(--fg-muted)' }}>{b.label}:</span>
+            <span style={{ color: 'var(--fg-dim)', fontWeight: 600 }}>{b.count}</span>
+          </div>
+        ))}
       </div>
-    </div>
-  );
-}
-
-function DailyChart({ data }: { data: MetricsData['daily_volume'] }) {
-  const max = useMemo(() => Math.max(...data.map((d) => d.total), 1), [data]);
-
-  if (!data || data.length === 0) {
-    return <p style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>Sem dados</p>;
-  }
-
-  const totalPeriod = data.reduce((a, b) => a + b.total, 0);
-  const avgPerDay = Math.round(totalPeriod / data.length);
-
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 16 }}>
-        <div>
-          <p style={{ fontSize: 24, fontWeight: 900, color: 'var(--strong-text)', letterSpacing: '-0.02em', lineHeight: 1 }}>{totalPeriod.toLocaleString('pt-BR')}</p>
-          <p style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Mensagens no período</p>
-        </div>
-        <div>
-          <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg-dim)', lineHeight: 1 }}>{avgPerDay}</p>
-          <p style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Média/dia</p>
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 160, paddingTop: 8 }}>
-        {data.map((d, i) => {
-          const h = (d.total / max) * 100;
-          const clientePct = d.total > 0 ? (d.cliente / d.total) * 100 : 0;
-          const iaPct = d.total > 0 ? (d.ia / d.total) * 100 : 0;
-          return (
-            <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}>
-              <div
-                title={`${d.date} · ${d.total} mensagens (cliente: ${d.cliente}, humano: ${d.humano}, IA: ${d.ia})`}
-                style={{
-                  width: '100%', height: `${Math.max(h, d.total > 0 ? 2 : 0)}%`,
-                  borderRadius: '4px 4px 0 0', overflow: 'hidden',
-                  background: 'var(--surface-3)',
-                  display: 'flex', flexDirection: 'column',
-                  cursor: 'pointer', transition: 'opacity 0.15s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.75'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
-              >
-                {iaPct > 0 && <div style={{ height: `${iaPct}%`, background: 'var(--accent)' }} />}
-                <div style={{ flex: 1, background: 'var(--emerald)' }} />
-                {clientePct > 0 && <div style={{ height: `${clientePct}%`, background: '#94a3b8' }} />}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Legenda */}
-      <div style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 11 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: '#94a3b8' }} /> Cliente
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--emerald)' }} /> Humano
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--accent)' }} /> IA
-        </div>
-      </div>
-    </div>
+    </>
   );
 }

@@ -154,6 +154,22 @@ export function ConversationItem({ conversation: c, isActive, onClick }: { conve
               }}>GRUPO</span>
             )}
 
+            {/* Tipo da conversa: P (pessoal) ou N (negócio) */}
+            {c.conversationType === 'personal' && (
+              <span title="Conversa pessoal" style={{
+                fontSize: 9, padding: '1px 5px', borderRadius: 4,
+                background: 'rgba(139,92,246,0.15)', color: '#a78bfa', fontWeight: 900,
+                flexShrink: 0,
+              }}>P</span>
+            )}
+            {c.conversationType === 'business' && (
+              <span title="Lead de negócio" style={{
+                fontSize: 9, padding: '1px 5px', borderRadius: 4,
+                background: 'rgba(16,185,129,0.15)', color: 'var(--emerald-light)', fontWeight: 900,
+                flexShrink: 0,
+              }}>N</span>
+            )}
+
             {/* Urgente badge */}
             {isUrgent && (
               <span

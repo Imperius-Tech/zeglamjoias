@@ -21,21 +21,26 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
   const [busy, setBusy] = useState<null | 'refresh' | 'mark_added' | 'dismiss' | 'check' | 'add'>(null);
   const [membership, setMembership] = useState<MembershipCheck>(null);
   const [addResult, setAddResult] = useState<{ method?: string; inviteUrl?: string; error?: string } | null>(null);
+  // Default: colapsado (economiza espaço em 1366x768). Persiste preferência do usuário por conversa.
   const [collapsed, setCollapsed] = useState<boolean>(() => {
-    return localStorage.getItem(`group-card-collapsed-${conv.id}`) === '1';
+    const stored = localStorage.getItem(`group-card-collapsed-${conv.id}`);
+    if (stored === '0') return false;
+    if (stored === '1') return true;
+    return true; // default colapsado
   });
   const data = conv.groupCandidateData || {};
   const status = conv.groupCandidateStatus;
 
-  if (!status || status === 'adicionada' || status === 'recusada') return null;
+  if (!status || status === 'recusada' || status === 'intent_detectado') return null;
 
   const complete = status === 'dados_coletados';
+  const alreadyAdded = status === 'adicionada';
 
   const toggleCollapse = () => {
     const next = !collapsed;
     setCollapsed(next);
-    if (next) localStorage.setItem(`group-card-collapsed-${conv.id}`, '1');
-    else localStorage.removeItem(`group-card-collapsed-${conv.id}`);
+    // Armazena explicitamente 0 ou 1 (null = default colapsado)
+    localStorage.setItem(`group-card-collapsed-${conv.id}`, next ? '1' : '0');
   };
 
   const filledCount = fields.filter((f) => data[f.key]).length;
@@ -46,6 +51,19 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
     try {
       await supabase.functions.invoke('group-candidate-extract', { body: { conversationId: conv.id } });
     } finally { setBusy(null); }
+  };
+
+  // Envia mensagem de boas-vindas automaticamente após adicionar/marcar o cliente no grupo
+  const sendWelcomeMessage = async () => {
+    const firstName = (conv.customerName || '').split(' ')[0] || '';
+    const welcome = `Oi${firstName ? ', ' + firstName : ''}! Seja muito bem-vindo(a)! 🎉\n\n🔗 *Acesso aos links:*\nAcesse: https://zeglam.semijoias.net/catalogo/\n\nNesse link, você pode fazer seu cadastro e acessar todos os links disponíveis para compras. No link de pronta entrega, sempre temos produtos com entrega mais rápida. 🚚✨\n\nSe precisar de ajuda no primeiro acesso, me chama que eu te auxilio 😉`;
+    try {
+      await supabase.functions.invoke('evolution-send', {
+        body: { conversationId: conv.id, text: welcome },
+      });
+    } catch (e) {
+      console.error('[GroupCandidateCard] failed to send welcome:', e);
+    }
   };
 
   const markAdded = async () => {
@@ -60,6 +78,7 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
       group_candidate_status: 'adicionada',
       group_candidate_updated_at: new Date().toISOString(),
     }).eq('id', conv.id);
+    await sendWelcomeMessage();
     setBusy(null);
   };
 
@@ -112,6 +131,7 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
             c.id === conv.id ? { ...c, groupCandidateStatus: 'adicionada' } : c
           ),
         }));
+        await sendWelcomeMessage();
       }
     } finally { setBusy(null); }
   };
@@ -124,23 +144,45 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
     if (lines) navigator.clipboard?.writeText(lines).catch(() => {});
   };
 
+  // Campos faltantes (exceto 'outro_grupo_nome' que é opcional — só se outro_grupo='sim')
+  const missingRequired = fields.filter((f) => {
+    if (f.key === 'outro_grupo_nome') return false;
+    return !data[f.key];
+  });
+
+  const askMissing = async () => {
+    if (busy || missingRequired.length === 0) return;
+    setBusy('refresh');
+    try {
+      // Formata labels amigáveis em bullet list
+      const bullets = missingRequired.map((f) => {
+        if (f.key === 'outro_grupo') return '• Você participa de algum outro Grupo de Compras Coletivas? (sim/não)';
+        return `• ${f.label}`;
+      }).join('\n');
+      const text = `Pra finalizar sua inclusão no grupo, preciso só de mais ${missingRequired.length === 1 ? 'um dado' : 'alguns dados'}:\n\n${bullets}`;
+      await supabase.functions.invoke('evolution-send', { body: { conversationId: conv.id, text } });
+    } finally { setBusy(null); }
+  };
+
+  const successState = complete || alreadyAdded;
+
   return (
-    <div style={{
+    <div className="group-candidate-card" style={{
       margin: '12px 16px 0',
       padding: 14,
       borderRadius: 12,
-      background: complete
+      background: successState
         ? 'linear-gradient(to right, rgba(16,185,129,0.08), rgba(16,185,129,0.02))'
         : 'linear-gradient(to right, rgba(251,191,36,0.08), rgba(251,191,36,0.02))',
-      border: `1px solid ${complete ? 'rgba(16,185,129,0.3)' : 'rgba(251,191,36,0.25)'}`,
+      border: `1px solid ${successState ? 'rgba(16,185,129,0.3)' : 'rgba(251,191,36,0.25)'}`,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: collapsed ? 0 : 10 }}>
-        <UserPlus size={16} style={{ color: complete ? 'var(--emerald-light)' : '#fbbf24' }} />
+        <UserPlus size={16} style={{ color: successState ? 'var(--emerald-light)' : '#fbbf24' }} />
         <span style={{
           fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em',
-          color: complete ? 'var(--emerald-light)' : '#fbbf24',
+          color: successState ? 'var(--emerald-light)' : '#fbbf24',
         }}>
-          {complete ? 'Pronta para adicionar ao grupo' : 'Coletando dados de entrada no grupo'}
+          {alreadyAdded ? 'Cliente já no grupo ✓' : complete ? 'Pronta para adicionar ao grupo' : 'Coletando dados de entrada no grupo'}
         </span>
         {collapsed && (
           <span style={{
@@ -150,6 +192,22 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
           }}>
             {filledCount}/{fields.length} preenchidos
           </span>
+        )}
+        {collapsed && !complete && missingRequired.length > 0 && (
+          <button
+            onClick={askMissing}
+            disabled={!!busy}
+            title={`IA pede os ${missingRequired.length} dados faltantes`}
+            style={{
+              padding: '4px 10px', borderRadius: 6,
+              background: 'rgba(251,191,36,0.15)', border: '1px solid rgba(251,191,36,0.35)',
+              color: '#fbbf24', fontSize: 11, fontWeight: 700,
+              cursor: busy ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            {busy === 'refresh' ? <Loader size={10} style={{ animation: 'spin 1s linear infinite' }} /> : <UserPlus size={10} />}
+            Pedir faltantes
+          </button>
         )}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           {!collapsed && (
@@ -184,7 +242,7 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
       {!collapsed && (<>
 
       {/* Grid de campos */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+      <div className="group-candidate-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
         {fields.map((f) => {
           const val = data[f.key];
           const filled = !!val;
@@ -258,63 +316,109 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
 
       {/* Ações */}
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-        <button
-          onClick={dismiss}
-          disabled={busy === 'dismiss'}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
-            background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-muted)',
-            fontSize: 12, fontWeight: 500, cursor: busy === 'dismiss' ? 'wait' : 'pointer',
-          }}
-        >
-          {busy === 'dismiss' ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <X size={12} />}
-          Descartar
-        </button>
-        <button
-          onClick={checkMembership}
-          disabled={busy === 'check'}
-          title="Verificar se o número já participa do grupo"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
-            background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)',
-            fontSize: 12, fontWeight: 500, cursor: busy === 'check' ? 'wait' : 'pointer',
-          }}
-        >
-          {busy === 'check' ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Search size={12} />}
-          Verificar grupo
-        </button>
-        <button
-          onClick={markAdded}
-          disabled={busy === 'mark_added' || !complete}
-          title={!complete ? 'Aguarde os dados serem coletados' : 'Marcar manualmente como já adicionada'}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
-            background: 'var(--glass)', border: '1px solid var(--border)',
-            color: complete ? 'var(--fg-dim)' : 'var(--fg-subtle)',
-            fontSize: 12, fontWeight: 500,
-            cursor: complete && !busy ? 'pointer' : 'not-allowed',
-            opacity: complete ? 1 : 0.6,
-          }}
-        >
-          {busy === 'mark_added' ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={12} />}
-          Marcar manual
-        </button>
-        <button
-          onClick={addToGroup}
-          disabled={busy === 'add' || !complete}
-          title={!complete ? 'Aguarde os dados serem coletados' : 'Adicionar automaticamente ao grupo'}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
-            background: complete ? 'var(--emerald)' : 'rgba(16,185,129,0.2)',
-            color: complete ? '#fff' : 'var(--fg-subtle)',
-            fontSize: 12, fontWeight: 600, border: 'none',
-            cursor: complete && !busy ? 'pointer' : 'not-allowed',
-            opacity: complete ? 1 : 0.6,
-          }}
-        >
-          {busy === 'add' ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <UserPlus size={12} />}
-          Adicionar ao grupo
-        </button>
+        {alreadyAdded ? (
+          <>
+            <button
+              onClick={async () => { if (busy) return; setBusy('refresh'); await sendWelcomeMessage(); setBusy(null); }}
+              disabled={!!busy}
+              title="Reenviar mensagem de boas-vindas"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
+                background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)',
+                fontSize: 12, fontWeight: 500, cursor: busy ? 'wait' : 'pointer',
+              }}
+            >
+              {busy === 'refresh' ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <UserPlus size={12} />}
+              Reenviar boas-vindas
+            </button>
+            <button
+              onClick={async () => {
+                if (busy) return;
+                setBusy('dismiss');
+                useDashboardStore.setState((state) => ({
+                  conversations: state.conversations.map((c) =>
+                    c.id === conv.id ? { ...c, groupCandidateStatus: 'dados_coletados' } : c
+                  ),
+                }));
+                await supabase.from('conversations').update({
+                  group_candidate_status: 'dados_coletados',
+                  group_candidate_updated_at: new Date().toISOString(),
+                }).eq('id', conv.id);
+                setBusy(null);
+              }}
+              disabled={!!busy}
+              title="Reabrir cadastro (volta pro status pronta para adicionar)"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
+                background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-muted)',
+                fontSize: 12, fontWeight: 500, cursor: busy ? 'wait' : 'pointer',
+              }}
+            >
+              <RefreshCw size={12} />
+              Reabrir
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={dismiss}
+              disabled={busy === 'dismiss'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
+                background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-muted)',
+                fontSize: 12, fontWeight: 500, cursor: busy === 'dismiss' ? 'wait' : 'pointer',
+              }}
+            >
+              {busy === 'dismiss' ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <X size={12} />}
+              Descartar
+            </button>
+            <button
+              onClick={checkMembership}
+              disabled={busy === 'check'}
+              title="Verificar se o número já participa do grupo"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
+                background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)',
+                fontSize: 12, fontWeight: 500, cursor: busy === 'check' ? 'wait' : 'pointer',
+              }}
+            >
+              {busy === 'check' ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Search size={12} />}
+              Verificar grupo
+            </button>
+            <button
+              onClick={markAdded}
+              disabled={busy === 'mark_added' || !complete}
+              title={!complete ? 'Aguarde os dados serem coletados' : 'Marcar manualmente como já adicionada'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
+                background: 'var(--glass)', border: '1px solid var(--border)',
+                color: complete ? 'var(--fg-dim)' : 'var(--fg-subtle)',
+                fontSize: 12, fontWeight: 500,
+                cursor: complete && !busy ? 'pointer' : 'not-allowed',
+                opacity: complete ? 1 : 0.6,
+              }}
+            >
+              {busy === 'mark_added' ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={12} />}
+              Marcar manual
+            </button>
+            <button
+              onClick={addToGroup}
+              disabled={busy === 'add' || !complete}
+              title={!complete ? 'Aguarde os dados serem coletados' : 'Adicionar automaticamente ao grupo'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
+                background: complete ? 'var(--emerald)' : 'rgba(16,185,129,0.2)',
+                color: complete ? '#fff' : 'var(--fg-subtle)',
+                fontSize: 12, fontWeight: 600, border: 'none',
+                cursor: complete && !busy ? 'pointer' : 'not-allowed',
+                opacity: complete ? 1 : 0.6,
+              }}
+            >
+              {busy === 'add' ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <UserPlus size={12} />}
+              Adicionar ao grupo
+            </button>
+          </>
+        )}
       </div>
 
       </>)}

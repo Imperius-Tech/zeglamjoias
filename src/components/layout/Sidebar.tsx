@@ -71,11 +71,11 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         }}
       >
         {/* Logo */}
-        <div style={{ padding: '24px 24px 16px' }}>
+        <div className="sidebar-compact-logo" style={{ padding: '24px 24px 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <img src="/zeglam.png" alt="Zeglam" style={{ width: 32, height: 32, borderRadius: 8 }} />
-              <span style={{ fontSize: 18, fontWeight: 900, letterSpacing: '-0.04em', color: 'var(--strong-text)' }}>ZEGLAM</span>
+              <span className="brand" style={{ fontSize: 18, fontWeight: 900, letterSpacing: '-0.04em', color: 'var(--strong-text)' }}>ZEGLAM</span>
               <span style={{ position: 'relative', width: 8, height: 8, display: 'inline-flex' }}>
                 {unreadTotal > 0 && (
                   <span className="anim-ping" style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--accent)', opacity: 0.75 }} />
@@ -92,13 +92,13 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               <X size={18} />
             </button>
           </div>
-          <p style={{ fontSize: 10, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.3em', color: 'var(--fg-subtle)', marginTop: 4 }}>
+          <p className="subtitle" style={{ fontSize: 10, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.3em', color: 'var(--fg-subtle)', marginTop: 4 }}>
             Painel IA
           </p>
         </div>
 
         {/* Nav */}
-        <nav style={{ flex: 1, padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: 24, overflowY: 'auto' }}>
+        <nav className="sidebar-compact-nav" style={{ flex: 1, padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: 24, overflowY: 'auto' }}>
           {categories.map((cat) => (
             <div key={cat.label} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <h3 style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-faint)', letterSpacing: '0.1em', padding: '0 12px', marginBottom: 8 }}>
@@ -138,8 +138,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </nav>
 
         {/* User card */}
-        <div style={{ padding: '0 16px 16px' }}>
-          <div style={{
+        <div className="sidebar-compact-footer" style={{ padding: '0 16px 16px' }}>
+          <div className="user-card" style={{
             display: 'flex', alignItems: 'center', gap: 12, padding: 12, borderRadius: 12,
             background: 'var(--glass)', border: '1px solid var(--border)',
           }}>
@@ -150,7 +150,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               fontSize: 14, fontWeight: 700, color: 'var(--strong-text)',
             }}>{activeInstanceName?.[0]?.toUpperCase() || 'W'}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <p className="truncate" style={{ fontSize: 14, fontWeight: 600, color: 'var(--strong-text)' }}>{activeInstanceName || 'WhatsApp'}</p>
+              <p className="truncate user-name" style={{ fontSize: 14, fontWeight: 600, color: 'var(--strong-text)' }}>{activeInstanceName || 'WhatsApp'}</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--emerald)' }} />
                 <span style={{ fontSize: 11, color: 'var(--emerald-light)' }}>Online</span>

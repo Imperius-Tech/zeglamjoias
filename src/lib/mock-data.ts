@@ -15,11 +15,12 @@ export interface Message {
   suggestionGroupId?: string | null;
   suggestionConfidence?: number | null;
   suggestionStyle?: 'direct' | 'warm' | null;
+  autoSendAt?: Date | null;
 }
 
 export type ConversationType = 'business' | 'personal' | 'unknown';
 
-export type GroupCandidateStatus = 'aguardando_dados' | 'dados_coletados' | 'adicionada' | 'recusada' | null;
+export type GroupCandidateStatus = 'intent_detectado' | 'aguardando_dados' | 'dados_coletados' | 'adicionada' | 'recusada' | null;
 
 export interface GroupCandidateData {
   nome_completo?: string | null;
@@ -49,6 +50,9 @@ export interface Conversation {
   messagesLoaded?: boolean;
   priority?: 'normal' | 'alta' | 'altissima' | null;
   priorityReason?: string | null;
+  // Quando existe entry em pending_ai_replies: scheduled_at = momento em que IA vai responder
+  pendingReplyAt?: Date | null;
+  pendingReplyMsgCount?: number | null;
 }
 
 export interface KnowledgeEntry {

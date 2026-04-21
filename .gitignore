@@ -8,3 +8,4 @@ dist
 .env.local
 .env.production
 .claude/
+docs/RELATORIO_FAQ_ZEVALDO.md

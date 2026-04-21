@@ -213,6 +213,18 @@ input::placeholder, textarea::placeholder {
   .chat-header { padding: 0 14px !important; }
   /* Header chat: compacta labels dos botões pra caber em 1366 */
   .chat-header-btn-label { display: none !important; }
+  /* Chat header menor em 1366x768 (libera ~20px de altura) */
+  .chat-header { height: 58px !important; }
+  /* Contexto IA: altura menor + linha compacta */
+  .chat-context-ia { padding: 8px 16px !important; margin: 8px 16px !important; }
+  .chat-context-ia p { font-size: 11px !important; line-height: 1.4 !important; max-height: 44px !important; overflow: hidden !important; }
+  /* Sugestões IA: compacta padding + font */
+  .chat-suggestions-panel { padding: 8px 14px !important; }
+  .chat-suggestions-panel .suggestion-card { padding: 8px 10px !important; gap: 6px !important; }
+  .chat-suggestions-panel .suggestion-card p { font-size: 12px !important; line-height: 1.35 !important; }
+  .chat-suggestions-panel .suggestion-card button { padding: 6px 10px !important; font-size: 11px !important; }
+  /* Input menor */
+  .chat-input-row { padding: 10px 14px !important; }
   /* Sidebar compacta: menos padding/gap pra caber 4 categorias em 768px */
   .sidebar-compact-logo { padding: 12px 14px 8px !important; }
   .sidebar-compact-logo img { width: 24px !important; height: 24px !important; }

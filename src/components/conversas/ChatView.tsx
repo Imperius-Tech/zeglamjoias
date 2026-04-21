@@ -176,7 +176,7 @@ export function ChatView() {
 
       {/* AI Summary (Fixed below header) */}
       {conv.aiAnalysis?.resumo && (
-        <div style={{ padding: '8px 20px', background: 'var(--header-bg)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <div className="chat-context-ia" style={{ padding: '8px 20px', background: 'var(--header-bg)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', background: 'linear-gradient(to right, rgba(212, 175, 55, 0.08), rgba(212, 175, 55, 0.02))', borderLeft: '3px solid var(--accent)', borderRadius: '0 8px 8px 0' }}>
             <Brain size={14} style={{ color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
             <p style={{ fontSize: 12, color: 'var(--fg-dim)', lineHeight: 1.4, margin: 0 }}>
@@ -463,7 +463,7 @@ export function ChatView() {
         };
 
         return (
-          <div style={{ borderTop: '1px solid var(--accent-border)', background: 'linear-gradient(to bottom, rgba(212, 175, 55, 0.06), rgba(212, 175, 55, 0.02))' }}>
+          <div className="chat-suggestions-panel" style={{ borderTop: '1px solid var(--accent-border)', background: 'linear-gradient(to bottom, rgba(212, 175, 55, 0.06), rgba(212, 175, 55, 0.02))' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px 8px', flexWrap: 'wrap' }}>
               <Bot size={14} style={{ color: 'var(--accent)' }} />
               <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Sugestões da IA</span>
@@ -565,7 +565,7 @@ export function ChatView() {
                 const isDiscarded = isProcessing && s.id !== bestSuggestionId;
                 return (
                 <div key={s.id}
-                  className={isChosen ? 'suggestion-chosen' : ''}
+                  className={`suggestion-card ${isChosen ? 'suggestion-chosen' : ''}`}
                   style={{
                     padding: 12, borderRadius: 12,
                     background: 'var(--glass)',
@@ -621,7 +621,7 @@ export function ChatView() {
       })()}
 
       {/* Input */}
-      <div style={{ borderTop: '1px solid var(--border)', padding: 16 }}>
+      <div className="chat-input-row" style={{ borderTop: '1px solid var(--border)', padding: 16 }}>
         <form
           onSubmit={(e) => {
             e.preventDefault();

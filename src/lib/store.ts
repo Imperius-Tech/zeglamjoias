@@ -380,36 +380,74 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     set({ knowledgeEntries });
   },
 
-  selectConversation: (id) => {
+  selectConversation: async (id) => {
     if (!id) {
       set({ selectedConversationId: null });
       return;
     }
 
-    const conversations = get().conversations;
-    const conv = conversations.find(c => c.id === id);
+    let conversations = get().conversations;
+    let conv = conversations.find(c => c.id === id);
 
+    // Se não estiver na lista atual, buscamos do banco
     if (!conv) {
-      set({ selectedConversationId: id });
-      return;
+      set({ loading: true });
+      const { data: row } = await supabase
+        .from('conversations')
+        .select(`
+          *,
+          last_msg:messages(id, author, content, created_at, media_url, media_type, status)
+        `)
+        .eq('id', id)
+        .order('created_at', { foreignTable: 'messages', ascending: false })
+        .limit(1, { foreignTable: 'messages' })
+        .maybeSingle();
+
+      if (row) {
+        // Mapeia o resultado similar ao rowToConversation
+        const r = {
+          ...row,
+          last_msg_id: row.last_msg?.[0]?.id,
+          last_msg_author: row.last_msg?.[0]?.author,
+          last_msg_content: row.last_msg?.[0]?.content,
+          last_msg_created_at: row.last_msg?.[0]?.created_at,
+          last_msg_media_url: row.last_msg?.[0]?.media_url,
+          last_msg_media_type: row.last_msg?.[0]?.media_type,
+          last_msg_status: row.last_msg?.[0]?.status,
+        };
+        conv = rowToConversation(r);
+        set((state) => ({ conversations: [conv!, ...state.conversations] }));
+      } else {
+        set({ selectedConversationId: null, loading: false });
+        return;
+      }
     }
 
-    const needsStatusUpdate = conv.status === 'aguardando_humano';
-
-    // Update locally
-    set((state) => ({
+    // Reset de filtros para garantir visibilidade no painel lateral
+    const isGroup = conv.isGroup;
+    set({
       selectedConversationId: id,
-      conversations: state.conversations.map((c) =>
-        c.id === id ? { ...c, unreadCount: 0, status: needsStatusUpdate ? 'ia_respondendo' : c.status } : c
-      ),
-    }));
+      conversationFilter: 'all',
+      conversationTab: isGroup ? 'grupos' : 'individuais',
+      searchQuery: '',
+      loading: false,
+    });
 
     // Lazy-load mensagens completas (se ainda não carregadas)
     if (!conv.messagesLoaded) {
       get().loadConversationMessages(id);
     }
 
-    // Update in DB (Async) — realtime subscriber will reconcile any drift
+    const needsStatusUpdate = conv.status === 'aguardando_humano';
+
+    // Update locally (unread count)
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === id ? { ...c, unreadCount: 0, status: needsStatusUpdate ? 'ia_respondendo' : c.status } : c
+      ),
+    }));
+
+    // Update in DB (Async)
     const updates: any = { unread_count: 0 };
     if (needsStatusUpdate) updates.status = 'ia_respondendo';
 

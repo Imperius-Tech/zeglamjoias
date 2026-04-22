@@ -1,0 +1,290 @@
+MARKEI
+Dashboard IA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Manual de Uso e Credenciais
+Guia Completo para Secretarias
+Dr. Bruno Postigo
+Versão 1.0  |  Janeiro 2026
+Sumário
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Introdução .................................................. 3
+2. Acesso ao Sistema .......................................... 4
+3. Dashboard (Visão Geral) .................................... 5
+4. Minhas IAs (Assistentes) ................................... 6
+5. Pacientes e Leads .......................................... 7
+6. Follow-ups ................................................. 8
+7. Analytics .................................................. 9
+8. Chat & Histórico ........................................... 10
+9. Configurações .............................................. 11
+10. Credenciais Administrativas ............................... 12
+11. Como Conectar o WhatsApp (Evolution API) .................. 14
+12. Suporte e Problemas Comuns ................................ 17
+1. Introdução
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Bem-vindo ao Markei Dashboard IA! Este é um painel de monitoramento em tempo real desenvolvido para acompanhar o desempenho dos assistentes virtuais (IAs) de agendamento médico.
+Com este sistema você pode:
+•  Monitorar o status das IAs em tempo real
+•  Visualizar e gerenciar leads (pacientes)
+•  Acompanhar conversas e histórico de atendimentos
+•  Gerenciar follow-ups automáticos e manuais
+•  Analisar métricas de conversão e desempenho
+•  Intervir manualmente em conversas quando necessário
+•  Enviar mensagens personalizadas aos pacientes
+2. Acesso ao Sistema
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2.1 Credenciais do Dashboard
+Use as credenciais abaixo para acessar o painel de controle:
+Campo
+Valor
+URL
+https://markei.vercel.app/
+Email
+caiokouta@markei.com
+Senha
+Markeii@2026
+2.2 Como Fazer Login
+Passo 1: Abra seu navegador (Chrome, Firefox ou Edge)
+Passo 2: Acesse https://markei.vercel.app/
+Passo 3: Digite seu email e senha
+Passo 4: Clique em 'Continuar'
+3. Dashboard (Visão Geral)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+A página inicial apresenta uma visão geral de todas as métricas importantes do seu atendimento.
+Indicadores Principais (KPIs)
+•  IAs Ativas - Quantidade de assistentes online
+•  Tempo Médio - Tempo médio de resposta da IA (em segundos)
+•  Conversas - Total de conversas iniciadas no período
+•  Mensagens - Total de mensagens trocadas
+Gráficos Disponíveis
+•  Performance por IA - Comparativo entre assistentes
+•  Temperatura dos Leads - Quente (vermelho), Morno (amarelo), Frio (azul)
+•  Volume Horário - Fluxo de mensagens ao longo do dia
+•  FUPs Pendentes - Follow-ups aguardando envio
+•  Leads Quentes - Leads com alta probabilidade de conversão
+Dica: Use o filtro no canto superior direito para alterar o período (Hoje, Semana, Mês, Ano).
+4. Minhas IAs (Assistentes Virtuais)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Nesta página você visualiza e gerencia todos os assistentes virtuais cadastrados.
+Informações Exibidas
+•  Nome do assistente (ex: Dr. Bruno Postigo)
+•  Status atual (Online/Offline/Manutenção)
+•  Pacientes atendidos
+•  Número de telefone do WhatsApp
+Status dos Assistentes
+•  OPERACIONAIS (verde) - IAs funcionando normalmente
+•  MANUTENÇÃO (amarelo) - IAs em manutenção temporária
+•  INDISPONÍVEIS (vermelho) - IAs offline
+Ações Disponíveis
+•  Atualizar agora - Sincroniza o status de todas as IAs
+•  WhatsApp - Abre conversa no WhatsApp
+•  Buscar - Pesquise por nome ou número
+5. Pacientes e Leads
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Gerencie todos os pacientes/leads que entraram em contato com os assistentes.
+Colunas da Tabela
+•  Nome - Nome do paciente
+•  Telefone - Número de contato
+•  Médico - Assistente que atendeu
+•  Status - Situação atual (Active, Closed)
+•  Data - Data do primeiro contato
+Filtros Disponíveis
+•  Período - Hoje, Este Mês, Este Ano, Todos
+•  Status - Filtrar por situação do lead
+•  IA - Filtrar por assistente específico
+•  Ordenação - Mais Recentes, Nome, Status
+Ações
+•  Visualizar (ícone olho) - Ver detalhes do lead
+•  Editar (ícone lápis) - Editar informações
+•  Excluir (ícone lixeira) - Remover lead
+•  Baixar CSV - Exportar dados para Excel
+6. Follow-ups
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Acompanhe os lembretes e retornos agendados para seus leads.
+AVISO IMPORTANTE
+O envio automático de follow-ups está TEMPORARIAMENTE DESATIVADO para evitar bloqueios no WhatsApp.
+O sistema continua contabilizando o tempo e mostrando os estágios normalmente, para que a secretaria tenha visibilidade de quais leads estão aguardando retorno. Porém, as mensagens automáticas NÃO estão sendo enviadas.
+Caso deseje reativar os follow-ups automáticos, entre em contato com o suporte técnico.
+Estágios de Follow-up (Apenas Visualização)
+O sistema mostra em qual estágio cada lead está:
+•  Aguardando 1h - Lead sem resposta há 1 hora
+•  Aguardando 24h - Lead sem resposta há 24 horas
+•  Aguardando 48h - Lead sem resposta há 48 horas
+•  Esgotados - Mais de 48 horas sem resposta
+Informações da Tabela
+•  Lead - Nome e telefone do paciente
+•  IA - Assistente responsável
+•  Estágio - Fase atual do follow-up
+•  Última MSG - Data/hora da última mensagem
+•  Próximo FUP - Quando seria o próximo envio (desativado)
+•  Countdown - Contagem regressiva em tempo real
+Follow-ups Manuais
+Na aba 'Manuais' você pode criar follow-ups personalizados para leads específicos. Esta é a forma recomendada de fazer retornos enquanto o automático estiver desativado.
+7. Analytics
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Acompanhe o desempenho do funil de vendas, follow-ups e taxas de conversão.
+Métricas Principais
+•  Total de Leads - Quantidade total de contatos
+•  Novos Hoje - Leads que entraram hoje
+•  Prob. Conversão Média - Probabilidade média de conversão
+•  FUPs Pendentes - Follow-ups aguardando envio
+Gráficos
+•  Funil de Conversão - Em qual etapa estão os leads
+•  Temperatura dos Leads - Distribuição Quente/Morno/Frio
+•  Distribuição de Follow-ups - Status dos follow-ups automáticos
+8. Chat & Histórico
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Visualize e gerencie todas as conversas em tempo real. Você pode assumir o atendimento a qualquer momento.
+Layout de 3 Colunas
+•  Coluna 1 (Assistentes) - Lista de IAs disponíveis
+•  Coluna 2 (Pacientes) - Leads do assistente selecionado
+•  Coluna 3 (Conversa) - Histórico completo de mensagens
+Como Usar
+1. Selecione um assistente na coluna da esquerda
+2. Escolha um paciente na coluna do meio
+3. Visualize a conversa na coluna da direita
+4. Use o campo de texto para enviar mensagens
+Funcionalidades
+•  Enviar mensagens manualmente
+•  Pausar/retomar o bot
+•  Assumir atendimento (modo humano)
+•  Analisar conversa com IA
+•  Baixar conversa em CSV
+9. Configurações
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Personalize seu perfil e preferências do sistema.
+Perfil
+•  Foto de Perfil - Clique para alterar sua foto
+•  Nome Completo - Seu nome de exibição
+•  Cargo - Sua função (ex: Administrador)
+•  Email - Seu email de acesso (não editável)
+Aparência
+•  Tema Claro - Interface com fundo branco
+•  Tema Escuro - Interface com fundo escuro (padrão)
+10. Credenciais Administrativas
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Abaixo estão as credenciais de acesso às plataformas administrativas. Guarde estas informações em local seguro.
+10.1 Conta Google (Acesso Geral)
+Use esta conta para acessar serviços que requerem login via Google.
+Campo
+Valor
+Email
+projetocaio32@gmail.com
+Senha
+Markeii@2026
+10.2 Supabase (Banco de Dados)
+Plataforma onde ficam armazenados todos os dados do sistema.
+Campo
+Valor
+URL
+https://supabase.com/dashboard
+Email
+projetocaio32@gmail.com
+Senha
+Markeii@2026
+10.3 Evolution API (WhatsApp)
+Gerenciador da conexão WhatsApp dos assistentes virtuais.
+Campo
+Valor
+URL Manager
+https://imperiustech-evolution-api.ow8uan.easypanel.host/manager
+Server URL
+https://imperiustech-evolution-api.ow8uan.easypanel.host
+API Key Global
+429683C4C977415CAAFCCE10F7D57E11
+10.4 n8n (Automações)
+Plataforma de automação dos fluxos e follow-ups.
+Campo
+Valor
+URL
+https://imperiustech-n8n.ow8uan.easypanel.host
+Email
+projetocaio32@gmail.com
+Senha
+Markeii@2026
+10.5 Hostinger (Hospedagem)
+Serviço de hospedagem - acesse via conta Google.
+Campo
+Valor
+URL
+https://www.hostinger.com.br/
+Login
+Entrar via Google
+Conta Google
+projetocaio32@gmail.com
+11. Como Conectar o WhatsApp (Evolution API)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Se o WhatsApp do assistente virtual estiver desconectado, siga este passo a passo para reconectar.
+Passo 1: Acessar o Evolution Manager
+Abra o navegador e acesse a URL do Evolution API Manager:
+Campo
+Valor
+URL
+https://imperiustech-evolution-api.ow8uan.easypanel.host/manager
+Passo 2: Fazer Login
+Na tela de login, preencha os campos:
+•  Server URL: https://imperiustech-evolution-api.ow8uan.easypanel.host
+•  API Key Global: 429683C4C977415CAAFCCE10F7D57E11
+Clique em 'Login' para entrar.
+Passo 3: Verificar Status da Instância
+Após o login, você verá a lista de instâncias. Localize a instância 'BrunoPostigo'.
+Status possíveis:
+•  Connected (verde) - WhatsApp conectado e funcionando
+•  Disconnected (vermelho) - WhatsApp desconectado, precisa reconectar
+Passo 4: Acessar a Instância
+Clique na instância 'BrunoPostigo' para abrir o painel de controle.
+No painel você verá:
+•  Dashboard - Visão geral da instância
+•  Contacts - Número de contatos
+•  Chats - Número de conversas
+•  Messages - Número de mensagens
+Passo 5: Gerar QR Code
+Se a instância estiver desconectada:
+1. Clique no botão verde 'Get QR Code'
+2. Um QR Code será exibido na tela
+3. Abra o WhatsApp no celular do Dr. Bruno Postigo
+4. Vá em Configurações > Dispositivos conectados > Conectar dispositivo
+5. Escaneie o QR Code exibido na tela
+Passo 6: Confirmar Conexão
+Após escanear o QR Code:
+•  O status mudará de 'Disconnected' para 'Connected'
+•  Os contadores de Contacts, Chats e Messages serão atualizados
+•  O assistente virtual voltará a funcionar normalmente
+IMPORTANTE: O QR Code expira em poucos segundos. Se expirar, clique em 'Get QR Code' novamente.
+Botões Úteis
+•  RESTART - Reinicia a instância (use se houver problemas)
+•  DISCONNECT - Desconecta o WhatsApp manualmente
+•  Get QR Code - Gera novo QR Code para conexão
+12. Suporte e Problemas Comuns
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Problemas Frequentes
+1. IA aparece como Indisponível
+•  Clique em 'Atualizar agora' na página Minhas IAs
+•  Se persistir, verifique a conexão no Evolution API Manager
+•  Aguarde alguns minutos e tente novamente
+2. Não consigo fazer login
+•  Verifique se o email está correto
+•  Confira se a senha está com letras maiúsculas/minúsculas corretas
+3. Mensagens não aparecem no chat
+•  Clique no botão 'Atualizar' da página
+•  Verifique sua conexão com a internet
+•  Selecione novamente o paciente
+4. Follow-ups não estão sendo enviados
+•  Verifique se o n8n está funcionando
+•  Confira se o lead não está com o bot pausado
+Contato para Suporte
+Este sistema foi desenvolvido por Gustavo Santos, colaborador da Imperius Tech.
+Campo
+Valor
+Desenvolvedor
+Gustavo Santos
+Telefone
++55 24 99940-9021
+Empresa
+Imperius Tech
+Entre em contato em caso de:
+•  Problemas técnicos no sistema
+•  Dúvidas sobre funcionalidades
+•  Solicitação de novas funcionalidades
+•  Reativação dos follow-ups automáticos
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Markei Dashboard IA © 2026 - Todos os direitos reservados

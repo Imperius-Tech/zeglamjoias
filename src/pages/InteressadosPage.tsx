@@ -20,7 +20,7 @@ interface InterestedCandidate {
   id: string;
   customer_name: string;
   customer_phone: string;
-  group_candidate_status: 'aguardando_dados' | 'dados_coletados' | 'adicionada' | 'recusada';
+  group_candidate_status: 'intent_detectado' | 'aguardando_dados' | 'dados_coletados' | 'adicionada' | 'recusada';
   group_candidate_data: GroupCandidateData | null;
   group_candidate_updated_at: string | null;
   last_message_at: string;
@@ -270,7 +270,7 @@ export default function InteressadosPage() {
                 </div>
               </div>
               <button
-                onClick={() => { selectConversation(selected.id); navigate('/conversas'); }}
+                onClick={async () => { await selectConversation(selected.id); navigate('/conversas'); }}
                 style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
               >
                 <MessageSquare size={16} /> Ver conversa

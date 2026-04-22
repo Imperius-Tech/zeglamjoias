@@ -11,6 +11,7 @@ import ComprovantesPage from '@/pages/ComprovantesPage';
 import AutomacoesPage from '@/pages/AutomacoesPage';
 import MetricasPage from '@/pages/MetricasPage';
 import ConfiguracoesPage from '@/pages/ConfiguracoesPage';
+import InteressadosPage from '@/pages/InteressadosPage';
 import LoginPage from '@/pages/LoginPage';
 import { Loader } from 'lucide-react';
 
@@ -101,6 +102,7 @@ export default function App() {
                   <Route path="/treinamento" element={<TreinamentoPage />} />
                   <Route path="/clientes" element={<ClientesPage />} />
                   <Route path="/comprovantes" element={<ComprovantesPage />} />
+                  <Route path="/interessados" element={<InteressadosPage />} />
                   <Route path="/automacoes" element={<AutomacoesPage />} />
                   <Route path="/metricas" element={<MetricasPage />} />
                   <Route path="/configuracoes" element={<ConfiguracoesPage />} />

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { MessageSquare, BookOpen, FileCheck, BarChart3, Settings, X, Users, Zap, LogOut, RefreshCw, Loader, GraduationCap } from 'lucide-react';
+import { MessageSquare, BookOpen, FileCheck, BarChart3, Settings, X, Users, Zap, LogOut, RefreshCw, Loader, GraduationCap, UserPlus } from 'lucide-react';
 import { useDashboardStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 
@@ -18,6 +18,7 @@ const categories = [
       { href: '/conhecimento', label: 'Base de Conhecimento', icon: BookOpen },
       { href: '/treinamento', label: 'Treinar IA', icon: GraduationCap },
       { href: '/comprovantes', label: 'Comprovantes', icon: FileCheck },
+      { href: '/interessados', label: 'Interessados', icon: UserPlus },
     ]
   },
   {

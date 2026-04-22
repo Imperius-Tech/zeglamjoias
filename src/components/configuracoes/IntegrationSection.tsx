@@ -159,6 +159,8 @@ export function IntegrationSection() {
   const [pendingAnalysisCount, setPendingAnalysisCount] = useState(0);
   const [analysisJob, setAnalysisJob] = useState<AnalysisJob | null>(null);
   const analysisLoopRef = useRef<boolean>(false);
+  const [syncingAvatars, setSyncingAvatars] = useState(false);
+  const [avatarProgress, setAvatarProgress] = useState({ updated: 0, failed: 0 });
 
   const loadConversations = useDashboardStore((s) => s.loadConversations);
 
@@ -504,6 +506,32 @@ export function IntegrationSection() {
       runAnalysisLoop(analysisJob.id);
     }
   }, [analysisJob?.id, analysisJob?.status, runAnalysisLoop]);
+
+  const handleSyncAvatars = useCallback(async () => {
+    if (!activeInstanceId) return;
+    setSyncingAvatars(true);
+    setAvatarProgress({ updated: 0, failed: 0 });
+    try {
+      let totalUpdated = 0;
+      let totalFailed = 0;
+      // Loop em lotes de 100
+      for (let i = 0; i < 5; i++) {
+        const { data, error } = await supabase.functions.invoke('evolution-sync-avatars', {
+          body: { action: 'sync', limit: 100 }
+        });
+        if (error || !data || (data.updated === 0 && data.failed === 0)) break;
+        totalUpdated += data.updated || 0;
+        totalFailed += data.failed || 0;
+        setAvatarProgress({ updated: totalUpdated, failed: totalFailed });
+        if ((data.updated || 0) < 100 && (data.failed || 0) < 100) break;
+      }
+    } catch (err) {
+      console.error('sync avatars error:', err);
+    } finally {
+      setSyncingAvatars(false);
+      loadInstanceInfo(activeInstanceName);
+    }
+  }, [activeInstanceId, activeInstanceName, loadInstanceInfo]);
 
   const handleStartSync = useCallback(async () => {
     setError(null);
@@ -992,6 +1020,58 @@ export function IntegrationSection() {
               </div>
             );
           })()}
+
+          {/* Avatar sync */}
+          {isConnected && (
+            <div style={{
+              padding: 18, borderRadius: 16, marginBottom: 20,
+              background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.03))',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
+              display: 'flex', alignItems: 'center', gap: 14,
+            }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: 10,
+                background: 'rgba(59, 130, 246, 0.15)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                {syncingAvatars ? (
+                  <Loader size={18} style={{ color: '#3b82f6', animation: 'spin 1s linear infinite' }} />
+                ) : (
+                  <Users size={18} style={{ color: '#3b82f6' }} />
+                )}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--strong-text)', marginBottom: 2 }}>
+                  {syncingAvatars 
+                    ? `Sincronizando fotos de perfil… ${avatarProgress.updated} atualizadas` 
+                    : 'Fotos de perfil ausentes'}
+                </p>
+                <p style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
+                  {syncingAvatars 
+                    ? `Processando em lotes via Evolution API…` 
+                    : 'Muitos contatos estão sem foto? Sincronize agora diretamente da Evolution.'}
+                </p>
+              </div>
+              <button
+                onClick={handleSyncAvatars}
+                disabled={syncingAvatars}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                  padding: '10px 18px', borderRadius: 10,
+                  background: syncingAvatars ? 'var(--surface-3)' : '#3b82f6',
+                  border: 'none',
+                  color: '#fff',
+                  fontSize: 13, fontWeight: 600,
+                  cursor: syncingAvatars ? 'wait' : 'pointer',
+                  flexShrink: 0,
+                  boxShadow: syncingAvatars ? 'none' : '0 4px 12px rgba(59, 130, 246, 0.3)',
+                }}
+              >
+                {syncingAvatars ? 'Sincronizando...' : 'Sincronizar Fotos'}
+              </button>
+            </div>
+          )}
 
           {/* Seletor de grupo default */}
           <GroupSelector instanceName={instanceName} instanceId={activeInstanceId} />

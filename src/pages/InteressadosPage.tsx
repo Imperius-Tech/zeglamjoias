@@ -203,8 +203,18 @@ export default function InteressadosPage() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 16, fontWeight: 800, color: 'var(--strong-text)',
                     border: '2px solid var(--border)',
+                    overflow: 'hidden',
+                    position: 'relative'
                   }}>
                     {candidate.customer_name[0]?.toUpperCase()}
+                    {candidate.profile_pic_url && (
+                      <img 
+                        src={candidate.profile_pic_url} 
+                        alt="" 
+                        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    )}
                   </div>
                   
                   <div style={{ flex: 1, minWidth: 0 }}>

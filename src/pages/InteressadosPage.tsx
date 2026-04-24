@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Search, UserPlus, CheckCircle2, XCircle, Clock, MessageSquare, Phone, Loader, MapPin, Tag, Building2, ExternalLink } from 'lucide-react';
+import { Search, UserPlus, CheckCircle2, XCircle, Clock, MessageSquare, Phone, Loader, MapPin, Tag, Building2, ExternalLink, Users, AlertCircle, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useDashboardStore } from '@/lib/store';
@@ -48,6 +48,9 @@ export default function InteressadosPage() {
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [membership, setMembership] = useState<{ alreadyMember: boolean; groupName: string | null; participantCount: number } | null>(null);
+  const [addResult, setAddResult] = useState<{ method?: string; inviteUrl?: string; error?: string } | null>(null);
+  const [action, setAction] = useState<null | 'check' | 'add' | 'welcome'>(null);
 
   useEffect(() => {
     loadCandidates();
@@ -80,10 +83,17 @@ export default function InteressadosPage() {
 
   async function updateStatus(id: string, status: InterestedCandidate['group_candidate_status']) {
     setUpdating(true);
+    const cand = candidates.find((c) => c.id === id);
     await supabase.from('conversations').update({
       group_candidate_status: status,
       group_candidate_updated_at: new Date().toISOString(),
     }).eq('id', id);
+    // Quando marca manual como adicionada, envia boas-vindas
+    if (status === 'adicionada' && cand) {
+      const firstName = (cand.customer_name || '').split(' ')[0] || '';
+      const welcome = `Oi${firstName ? ', ' + firstName : ''}! Seja muito bem-vindo(a)! 🎉\n\n🔗 *Acesso aos links:*\nAcesse: https://zeglam.semijoias.net/catalogo/\n\nNesse link, você pode fazer seu cadastro e acessar todos os links disponíveis para compras. No link de pronta entrega, sempre temos produtos com entrega mais rápida. 🚚✨\n\nSe precisar de ajuda no primeiro acesso, me chama que eu te auxilio 😉`;
+      try { await supabase.functions.invoke('evolution-send', { body: { conversationId: id, text: welcome } }); } catch (e) { console.error(e); }
+    }
     await loadCandidates();
     setUpdating(false);
   }
@@ -104,6 +114,62 @@ export default function InteressadosPage() {
   }, [candidates, filter, search]);
 
   const selected = selectedId ? candidates.find((c) => c.id === selectedId) : null;
+
+  useEffect(() => {
+    setMembership(null);
+    setAddResult(null);
+  }, [selectedId]);
+
+  async function sendWelcomeMessage(convId: string, customerName: string) {
+    const firstName = (customerName || '').split(' ')[0] || '';
+    const welcome = `Oi${firstName ? ', ' + firstName : ''}! Seja muito bem-vindo(a)! 🎉\n\n🔗 *Acesso aos links:*\nAcesse: https://zeglam.semijoias.net/catalogo/\n\nNesse link, você pode fazer seu cadastro e acessar todos os links disponíveis para compras. No link de pronta entrega, sempre temos produtos com entrega mais rápida. 🚚✨\n\nSe precisar de ajuda no primeiro acesso, me chama que eu te auxilio 😉`;
+    try {
+      await supabase.functions.invoke('evolution-send', { body: { conversationId: convId, text: welcome } });
+    } catch (e) { console.error('welcome failed:', e); }
+  }
+
+  async function checkMembership(convId: string) {
+    if (action) return;
+    setAction('check');
+    setAddResult(null);
+    try {
+      const { data: res, error } = await supabase.functions.invoke('group-membership', { body: { action: 'check', conversationId: convId } });
+      if (error || res?.error) {
+        setMembership(null);
+        setAddResult({ error: (res?.error || error?.message || 'erro ao verificar').toString() });
+      } else {
+        setMembership({ alreadyMember: !!res.alreadyMember, groupName: res.groupName, participantCount: res.participantCount });
+        // Se ja e membro, auto-marca como adicionada e NAO envia template
+        if (res.alreadyMember && selected && selected.group_candidate_status !== 'adicionada') {
+          await supabase.from('conversations').update({
+            group_candidate_status: 'adicionada',
+            group_candidate_updated_at: new Date().toISOString(),
+          }).eq('id', convId);
+          await loadCandidates();
+        }
+      }
+    } finally { setAction(null); }
+  }
+
+  async function addToGroup(convId: string, customerName: string) {
+    if (action) return;
+    setAction('add');
+    setAddResult(null);
+    try {
+      const { data: res, error } = await supabase.functions.invoke('group-membership', { body: { action: 'add', conversationId: convId } });
+      if (error || res?.error || res?.success === false) {
+        setAddResult({ error: (res?.error || error?.message || 'erro ao adicionar').toString() });
+      } else {
+        setAddResult({ method: res.method, inviteUrl: res.inviteUrl });
+        await supabase.from('conversations').update({
+          group_candidate_status: 'adicionada',
+          group_candidate_updated_at: new Date().toISOString(),
+        }).eq('id', convId);
+        await sendWelcomeMessage(convId, customerName);
+        await loadCandidates();
+      }
+    } finally { setAction(null); }
+  }
 
   const counts = {
     all: candidates.length,
@@ -313,12 +379,13 @@ export default function InteressadosPage() {
               <div style={{ display: 'flex', gap: 8 }}>
                 {selected.group_candidate_status === 'dados_coletados' && (
                   <button onClick={() => updateStatus(selected.id, 'adicionada')} disabled={updating}
-                    style={{ padding: '8px 16px', borderRadius: 8, background: 'var(--accent)', color: '#fff', border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                    Marcar como Adicionado
+                    title="Marca manualmente sem verificar grupo (use se adicionou fora do sistema)"
+                    style={{ padding: '8px 16px', borderRadius: 8, background: 'var(--glass)', color: 'var(--fg-dim)', border: '1px solid var(--border)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                    Marcar manual
                   </button>
                 )}
                 {selected.group_candidate_status === 'adicionada' && (
-                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', opacity: 0.8 }}>Participando do grupo</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', opacity: 0.8 }}>Participando do grupo ✓</span>
                 )}
               </div>
             </div>
@@ -343,21 +410,85 @@ export default function InteressadosPage() {
               ))}
             </div>
 
+            {/* Feedback de verificação/add */}
+            {membership && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, marginBottom: 12,
+                background: membership.alreadyMember ? 'rgba(251,191,36,0.1)' : 'rgba(59,130,246,0.08)',
+                border: `1px solid ${membership.alreadyMember ? 'rgba(251,191,36,0.25)' : 'rgba(59,130,246,0.2)'}`,
+              }}>
+                {membership.alreadyMember
+                  ? <AlertCircle size={14} style={{ color: '#fbbf24', flexShrink: 0 }} />
+                  : <Users size={14} style={{ color: '#60a5fa', flexShrink: 0 }} />}
+                <span style={{ fontSize: 12, color: 'var(--fg-dim)' }}>
+                  {membership.alreadyMember
+                    ? <>Já está no grupo <strong>{membership.groupName || 'Zeglam'}</strong> ({membership.participantCount} membros) — marcado automaticamente como adicionada</>
+                    : <>Ainda não faz parte de <strong>{membership.groupName || 'Zeglam'}</strong> ({membership.participantCount} membros)</>}
+                </span>
+              </div>
+            )}
+            {addResult && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, marginBottom: 12,
+                background: addResult.error ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.1)',
+                border: `1px solid ${addResult.error ? 'rgba(239,68,68,0.25)' : 'rgba(16,185,129,0.25)'}`,
+              }}>
+                {addResult.error
+                  ? <AlertCircle size={14} style={{ color: '#f87171', flexShrink: 0 }} />
+                  : <Check size={14} style={{ color: 'var(--emerald-light)', flexShrink: 0 }} />}
+                <span style={{ fontSize: 12, color: 'var(--fg-dim)' }}>
+                  {addResult.error ? <>Falhou: {addResult.error}</>
+                    : addResult.method === 'invite_link_sent' ? <>Adição direta não foi possível. Link de convite enviado ao cliente.</>
+                    : <>Adicionada ao grupo com sucesso. Boas-vindas enviada.</>}
+                </span>
+              </div>
+            )}
+
             {/* Actions Footer */}
-            <div style={{ paddingTop: 32, borderTop: '1px solid var(--border)', display: 'flex', gap: 12 }}>
-              <button onClick={() => updateStatus(selected.id, 'recusada')} disabled={updating}
-                style={{ flex: 1, padding: '12px', borderRadius: 12, background: 'rgba(239,68,68,0.1)', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.2)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+            <div style={{ paddingTop: 32, borderTop: '1px solid var(--border)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <button onClick={() => updateStatus(selected.id, 'recusada')} disabled={updating || !!action}
+                style={{ flex: '1 1 140px', padding: '12px', borderRadius: 12, background: 'rgba(239,68,68,0.1)', color: 'var(--red)', border: '1px solid rgba(239,68,68,0.2)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                 Recusar Entrada
               </button>
+
+              {selected.group_candidate_status !== 'adicionada' && (
+                <>
+                  <button onClick={() => checkMembership(selected.id)} disabled={updating || !!action}
+                    title="Verificar se o número já está no grupo. Se sim, marca como adicionada automaticamente sem enviar template."
+                    style={{ flex: '1 1 140px', padding: '12px', borderRadius: 12, background: 'var(--glass)', color: 'var(--fg-dim)', border: '1px solid var(--border)', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    {action === 'check' ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Search size={14} />}
+                    Verificar no grupo
+                  </button>
+
+                  <button
+                    onClick={() => addToGroup(selected.id, selected.customer_name)}
+                    disabled={updating || !!action || selected.group_candidate_status !== 'dados_coletados'}
+                    title={selected.group_candidate_status !== 'dados_coletados' ? 'Aguarde dados completos' : 'Adicionar ao grupo WhatsApp'}
+                    style={{
+                      flex: '1 1 140px', padding: '12px', borderRadius: 12,
+                      background: selected.group_candidate_status === 'dados_coletados' ? 'var(--emerald)' : 'rgba(16,185,129,0.2)',
+                      color: selected.group_candidate_status === 'dados_coletados' ? '#fff' : 'var(--fg-subtle)',
+                      border: 'none', fontSize: 13, fontWeight: 600,
+                      cursor: selected.group_candidate_status === 'dados_coletados' && !action ? 'pointer' : 'not-allowed',
+                      opacity: selected.group_candidate_status === 'dados_coletados' ? 1 : 0.6,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    }}>
+                    {action === 'add' ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <UserPlus size={14} />}
+                    Adicionar ao grupo
+                  </button>
+                </>
+              )}
+
               {selected.group_candidate_status === 'aguardando_dados' && (
-                <button onClick={() => updateStatus(selected.id, 'dados_coletados')} disabled={updating}
-                  style={{ flex: 1, padding: '12px', borderRadius: 12, background: 'var(--emerald)', color: '#fff', border: 'none', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
-                  Aprovar Cadastro
+                <button onClick={() => updateStatus(selected.id, 'dados_coletados')} disabled={updating || !!action}
+                  style={{ flex: '1 1 140px', padding: '12px', borderRadius: 12, background: 'var(--glass)', color: 'var(--fg-dim)', border: '1px solid var(--border)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                  Marcar dados completos
                 </button>
               )}
+
               {selected.group_candidate_status !== 'aguardando_dados' && selected.group_candidate_status !== 'adicionada' && (
-                <button onClick={() => updateStatus(selected.id, 'aguardando_dados')} disabled={updating}
-                  style={{ flex: 1, padding: '12px', borderRadius: 12, background: 'var(--glass)', color: 'var(--fg-dim)', border: '1px solid var(--border)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+                <button onClick={() => updateStatus(selected.id, 'aguardando_dados')} disabled={updating || !!action}
+                  style={{ flex: '1 1 140px', padding: '12px', borderRadius: 12, background: 'var(--glass)', color: 'var(--fg-dim)', border: '1px solid var(--border)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                   Voltar para Coleta
                 </button>
               )}

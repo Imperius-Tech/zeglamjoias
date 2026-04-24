@@ -144,12 +144,15 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             display: 'flex', alignItems: 'center', gap: 12, padding: 12, borderRadius: 12,
             background: 'var(--glass)', border: '1px solid var(--border)',
           }}>
-            <div style={{
-              width: 36, height: 36, borderRadius: '50%',
-              background: 'linear-gradient(135deg, var(--accent), var(--accent-sec))',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, fontWeight: 700, color: 'var(--strong-text)',
-            }}>{activeInstanceName?.[0]?.toUpperCase() || 'W'}</div>
+            <img
+              src="/zeglam.png"
+              alt="Zeglam"
+              style={{
+                width: 40, height: 40, borderRadius: '50%',
+                objectFit: 'cover', flexShrink: 0,
+                background: '#fff',
+              }}
+            />
             <div style={{ flex: 1, minWidth: 0 }}>
               <p className="truncate user-name" style={{ fontSize: 14, fontWeight: 600, color: 'var(--strong-text)' }}>{activeInstanceName || 'WhatsApp'}</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

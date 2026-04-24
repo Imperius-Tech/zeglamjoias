@@ -66,7 +66,7 @@ export interface Instance {
   isSandbox: boolean;
 }
 
-export type ConversationFilter = 'all' | ConversationStatus | 'adicionar_grupo' | 'urgentes' | 'nao_respondidas';
+export type ConversationFilter = 'all' | ConversationStatus | 'adicionar_grupo' | 'urgentes' | 'nao_respondidas' | 'business' | 'personal';
 export type ConversationTab = 'individuais' | 'grupos';
 export type ConversationSort = 'recent' | 'oldest' | 'unread' | 'priority' | 'name';
 

@@ -9,6 +9,8 @@ import { useState } from 'react';
 const filters: { value: ConversationFilter; label: string }[] = [
   { value: 'all', label: 'Todas' },
   { value: 'urgentes', label: 'Urgentes' },
+  { value: 'business', label: 'Negócio' },
+  { value: 'personal', label: 'Pessoais' },
   { value: 'nao_respondidas', label: 'Não respondidas' },
   { value: 'adicionar_grupo', label: 'Adicionar ao grupo' },
   { value: 'ia_respondendo', label: 'IA respondendo' },
@@ -185,20 +187,46 @@ export function ConversationList() {
             </button>
           )}
 
+          {/* Filtros rapidos: N (Negocio) / P (Pessoal) */}
+          <button
+            onClick={() => setFilter(filter === 'business' ? 'all' : 'business')}
+            title="Conversas de negócio"
+            style={{
+              width: 32, height: 32, borderRadius: 8, cursor: 'pointer',
+              fontSize: 12, fontWeight: 900, flexShrink: 0,
+              color: filter === 'business' ? '#fff' : 'var(--emerald-light)',
+              background: filter === 'business' ? 'var(--emerald)' : 'rgba(16,185,129,0.12)',
+              border: `1px solid ${filter === 'business' ? 'var(--emerald)' : 'rgba(16,185,129,0.35)'}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >N</button>
+          <button
+            onClick={() => setFilter(filter === 'personal' ? 'all' : 'personal')}
+            title="Conversas pessoais"
+            style={{
+              width: 32, height: 32, borderRadius: 8, cursor: 'pointer',
+              fontSize: 12, fontWeight: 900, flexShrink: 0,
+              color: filter === 'personal' ? '#fff' : '#a78bfa',
+              background: filter === 'personal' ? '#8b5cf6' : 'rgba(139,92,246,0.12)',
+              border: `1px solid ${filter === 'personal' ? '#8b5cf6' : 'rgba(139,92,246,0.35)'}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >P</button>
+
           <div style={{ position: 'relative', flex: 1 }}>
             <button
               onClick={() => setFilterMenuOpen((v) => !v)}
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '8px 12px', borderRadius: 10, cursor: 'pointer',
-                background: filter !== 'all' && filter !== 'urgentes' ? 'var(--accent-bg)' : 'var(--glass)',
-                border: `1px solid ${filter !== 'all' && filter !== 'urgentes' ? 'var(--accent-border)' : 'var(--border)'}`,
-                color: filter !== 'all' && filter !== 'urgentes' ? 'var(--accent)' : 'var(--fg-dim)',
+                background: filter !== 'all' && filter !== 'urgentes' && filter !== 'business' && filter !== 'personal' ? 'var(--accent-bg)' : 'var(--glass)',
+                border: `1px solid ${filter !== 'all' && filter !== 'urgentes' && filter !== 'business' && filter !== 'personal' ? 'var(--accent-border)' : 'var(--border)'}`,
+                color: filter !== 'all' && filter !== 'urgentes' && filter !== 'business' && filter !== 'personal' ? 'var(--accent)' : 'var(--fg-dim)',
                 fontSize: 12, fontWeight: 600,
               }}
             >
               <span>
-                {filter === 'all' || filter === 'urgentes'
+                {filter === 'all' || filter === 'urgentes' || filter === 'business' || filter === 'personal'
                   ? 'Todas'
                   : (filters.find((f) => f.value === filter)?.label || 'Filtrar')}
               </span>
@@ -212,7 +240,7 @@ export function ConversationList() {
                   background: 'rgb(30, 33, 40)', border: '1px solid var(--border-strong)',
                   borderRadius: 10, padding: 4, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
                 }}>
-                  {filters.filter((f) => f.value !== 'urgentes').map((f) => {
+                  {filters.filter((f) => f.value !== 'urgentes' && f.value !== 'business' && f.value !== 'personal').map((f) => {
                     const active = filter === f.value;
                     return (
                       <button

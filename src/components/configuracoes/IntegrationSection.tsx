@@ -529,7 +529,7 @@ export function IntegrationSection() {
       console.error('sync avatars error:', err);
     } finally {
       setSyncingAvatars(false);
-      loadInstanceInfo(activeInstanceName);
+      if (activeInstanceName) loadInstanceInfo(activeInstanceName);
     }
   }, [activeInstanceId, activeInstanceName, loadInstanceInfo]);
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { MessageSquare, BookOpen, FileCheck, BarChart3, Settings, X, Users, Zap, LogOut, RefreshCw, Loader, GraduationCap, UserPlus } from 'lucide-react';
+import { MessageSquare, BookOpen, FileCheck, BarChart3, Settings, X, Users, Zap, LogOut, RefreshCw, Loader, GraduationCap, UserPlus, ShoppingBag } from 'lucide-react';
 import { useDashboardStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 
@@ -26,6 +26,7 @@ const categories = [
     items: [
       { href: '/automacoes', label: 'Automações', icon: Zap },
       { href: '/metricas', label: 'Métricas', icon: BarChart3 },
+      { href: '/zeglam', label: 'Sistema Zeglam', icon: ShoppingBag },
     ]
   },
   {

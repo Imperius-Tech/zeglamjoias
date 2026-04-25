@@ -13,6 +13,7 @@ import MetricasPage from '@/pages/MetricasPage';
 import ConfiguracoesPage from '@/pages/ConfiguracoesPage';
 import InteressadosPage from '@/pages/InteressadosPage';
 import LoginPage from '@/pages/LoginPage';
+import ZeglamPage from '@/pages/ZeglamPage';
 import { Loader } from 'lucide-react';
 
 export default function App() {
@@ -106,6 +107,7 @@ export default function App() {
                   <Route path="/automacoes" element={<AutomacoesPage />} />
                   <Route path="/metricas" element={<MetricasPage />} />
                   <Route path="/configuracoes" element={<ConfiguracoesPage />} />
+                  <Route path="/zeglam" element={<ZeglamPage />} />
                 </Routes>
               </DashboardShell>
             )

@@ -158,7 +158,19 @@ export default function InteressadosPage() {
     try {
       const { data: res, error } = await supabase.functions.invoke('group-membership', { body: { action: 'add', conversationId: convId } });
       if (error || res?.error || res?.success === false) {
-        setAddResult({ error: (res?.error || error?.message || 'erro ao adicionar').toString() });
+        const rawErr = (res?.error || error?.message || '').toString();
+        const lastMsg = JSON.stringify(res?.details?.last_error || res?.details || {});
+        let friendly = rawErr;
+        if (lastMsg.includes('Connection Closed') || lastMsg.includes('not-acceptable') || lastMsg.includes('forbidden')) {
+          friendly = 'Cliente bloqueou ser adicionada por desconhecidos no WhatsApp. Adicione manualmente pelo seu celular ou use "Marcar manual" e envie o link do grupo direto.';
+        } else if (rawErr === 'group_full') {
+          friendly = 'Grupo cheio (limite WhatsApp atingido). Crie um novo grupo.';
+        } else if (rawErr === 'add_and_invite_failed') {
+          friendly = 'Não consegui adicionar nem mandar convite (cliente pode estar com privacidade restrita). Adicione manualmente.';
+        } else if (rawErr === 'invite_code_failed') {
+          friendly = 'Bot não tem permissão de admin do grupo. Promova o número da Zeglam a admin pra liberar convites automáticos.';
+        }
+        setAddResult({ error: friendly });
       } else {
         setAddResult({ method: res.method, inviteUrl: res.inviteUrl });
         await supabase.from('conversations').update({

@@ -23,6 +23,7 @@ import {
   Wallet
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useDashboardStore } from '@/lib/store';
 
 interface Payment {
   link: string;
@@ -46,6 +47,7 @@ interface PendingCustomer {
 
 export default function ZeglamPage() {
   const navigate = useNavigate();
+  const selectConversation = useDashboardStore(s => s.selectConversation);
   const [activeTab, setActiveTab] = useState<'financeiro' | 'inadimplentes'>('inadimplentes');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -61,63 +63,120 @@ export default function ZeglamPage() {
   const [pendingFilter, setPendingFilter] = useState<'todos' | 'com_comprovante' | 'sem_comprovante'>('todos');
   const [searchText, setSearchText] = useState('');
 
-  const normalize = (str: string) => 
+  const normalize = (str: string) =>
     str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
-  const getDigits = (str: string) => {
+  const firstName = (str: string | null | undefined) => {
     if (!str) return "";
-    const cleanStr = str.split('|')[0];
-    return cleanStr.replace(/\D/g, "");
+    return normalize(str).split(/\s+/)[0] || "";
+  };
+
+  const phoneTail = (str: string | null | undefined, n = 9) => {
+    if (!str) return "";
+    const digits = str.replace(/\D/g, "");
+    return digits.slice(-n);
+  };
+
+  const parseBrlAmount = (str: string | null | undefined): number | null => {
+    if (!str) return null;
+    const m = str.match(/R\$?\s*([\d.,]+)/i);
+    const raw = m ? m[1] : str;
+    const cleaned = raw.replace(/\./g, '').replace(',', '.').replace(/[^\d.]/g, '');
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? null : n;
+  };
+
+  const amountMatches = (zeglamValue: string, proofValue: string, tolerancePct = 0.05) => {
+    const a = parseBrlAmount(zeglamValue);
+    const b = parseBrlAmount(proofValue);
+    if (a == null || b == null || a <= 0 || b <= 0) return false;
+    const diff = Math.abs(a - b) / a;
+    return diff <= tolerancePct;
   };
 
   const fetchData = async () => {
     setRefreshing(true);
     setError(null);
     try {
-      const { data: allData, error: functionError } = await supabase.functions.invoke('zeglam-api', { 
-        body: { action: 'get_all' } 
+      const { data: allData, error: functionError } = await supabase.functions.invoke('zeglam-api', {
+        body: { action: 'get_all' }
       });
 
       if (functionError) throw new Error(functionError.message);
-      
-      const [proofsRes, convsRes] = await Promise.all([
+
+      const pendingList = allData?.pending || [];
+      const salesIds = pendingList.map((p: any) => p.salesId).filter(Boolean);
+
+      const [proofsRes, convsRes, phonesRes] = await Promise.all([
         supabase.from('payment_proofs')
           .select('customer_name, message_id, conversation_id, detected_value, created_at')
           .eq('status', 'pendente')
           .order('created_at', { ascending: false }),
-        supabase.from('conversations').select('id, customer_name')
+        supabase.from('conversations').select('id, customer_name, customer_phone'),
+        salesIds.length > 0
+          ? supabase.functions.invoke('zeglam-api', { body: { action: 'enrich_phones', salesIds } })
+          : Promise.resolve({ data: {} })
       ]);
 
       const proofs = proofsRes.data || [];
       const conversations = convsRes.data || [];
+      const phonesMap: Record<string, { phone_digits: string | null; customer_name: string | null }> = phonesRes.data || {};
 
-      const crossedPending = (allData?.pending || []).map((customer: any) => {
-        const normalizedZeglamName = normalize(customer.cliente);
-        const zeglamValueDigits = getDigits(customer.valor);
-        
-        const possibleProofs = proofs.filter(p => {
-          if (!p.customer_name) return false;
-          const pName = normalize(p.customer_name);
-          return normalizedZeglamName.includes(pName) || pName.includes(normalizedZeglamName);
-        });
+      const proofIndex = proofs.map(p => {
+        const conv = conversations.find(c => c.id === p.conversation_id);
+        return {
+          proof: p,
+          phoneTail: phoneTail(conv?.customer_phone),
+          firstName: firstName(p.customer_name),
+          convId: p.conversation_id,
+          detectedValue: p.detected_value,
+        };
+      });
 
-        let matchedProof = possibleProofs.find(p => getDigits(p.detected_value) === zeglamValueDigits);
-        if (!matchedProof && possibleProofs.length > 0) matchedProof = possibleProofs[0];
+      const debugMatches: any[] = [];
+      const crossedPending = pendingList.map((customer: any) => {
+        const enrich = customer.salesId ? phonesMap[customer.salesId] : null;
+        const zeglamPhoneTail = phoneTail(enrich?.phone_digits || '');
+
+        let matched: any = null;
+        let phoneNameCandidates: any[] = [];
+        if (zeglamPhoneTail.length >= 8) {
+          phoneNameCandidates = proofIndex.filter(p =>
+            p.phoneTail.length >= 8 &&
+            (p.phoneTail.endsWith(zeglamPhoneTail) || zeglamPhoneTail.endsWith(p.phoneTail))
+          );
+          matched = phoneNameCandidates.find(p => amountMatches(customer.valor, p.detectedValue || ''));
+        }
+
+        if (phoneNameCandidates.length > 0) {
+          debugMatches.push({
+            zeglamName: enrich?.customer_name || customer.cliente,
+            zeglamPhone: enrich?.phone_digits,
+            zeglamValue: customer.valor,
+            candidates: phoneNameCandidates.map(c => ({
+              proofName: c.proof?.customer_name,
+              detectedValue: c.detectedValue,
+              valueMatched: amountMatches(customer.valor, c.detectedValue || ''),
+            })),
+            finalMatched: !!matched,
+          });
+        }
 
         const matchedConv = conversations.find(c => {
-          if (!c.customer_name) return false;
-          const cName = normalize(c.customer_name);
-          return normalizedZeglamName.includes(cName) || cName.includes(normalizedZeglamName);
+          const cTail = phoneTail(c.customer_phone);
+          return cTail.length >= 8 && zeglamPhoneTail.length >= 8 &&
+            (cTail.endsWith(zeglamPhoneTail) || zeglamPhoneTail.endsWith(cTail));
         });
 
         return {
           ...customer,
-          hasProof: !!matchedProof,
-          conversationId: matchedProof?.conversation_id || matchedConv?.id,
-          proofMessageId: matchedProof?.message_id
+          hasProof: !!matched,
+          conversationId: matched?.convId || matchedConv?.id,
+          proofMessageId: matched?.proof?.message_id
         };
       });
 
+      console.log('[Zeglam Match Debug]', { totalCandidatesByPhoneName: debugMatches.length, sample: debugMatches.slice(0, 30), allDebug: debugMatches });
       setPayments(allData?.payments || []);
       setPendingCustomers(crossedPending);
     } catch (e: any) {
@@ -213,9 +272,9 @@ export default function ZeglamPage() {
             <div style={{ background: 'var(--glass)', borderRadius: 14, border: '1px solid var(--border)', overflow: 'hidden' }}>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                  <thead><tr style={{ background: 'var(--surface-2)' }}><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase' }}>Cliente</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase' }}>Cruzamento</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase' }}>Atraso</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', textAlign: 'right' }}>Valor</th></tr></thead>
+                  <thead><tr style={{ background: 'var(--surface-2)' }}><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase' }}>Cliente</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase' }}>Cruzamento</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase' }}>Atraso</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', textAlign: 'right' }}>Valor</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', textAlign: 'center' }}>Ações</th></tr></thead>
                   <tbody>{filteredPending.map((item, i) => (<tr key={i} style={{ borderBottom: i < filteredPending.length - 1 ? '1px solid var(--border)' : 'none' }}><td style={{ padding: '12px 20px' }}>
-                    <div 
+                    <div
                       onClick={() => item.salesId && handleCustomerClick(item.salesId)}
                       style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: item.salesId ? 'pointer' : 'default' }}
                       className="customer-row"
@@ -223,7 +282,24 @@ export default function ZeglamPage() {
                       <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(239,68,68,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}><UserX size={12} /></div>
                       <div><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)' }}>{item.cliente}</span><ChevronRight size={10} style={{ color: 'var(--fg-faint)' }} /></div><div style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>{item.catalogo}</div></div>
                     </div>
-                  </td><td style={{ padding: '12px 20px' }}>{item.hasProof ? (<div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(59,130,246,0.1)', color: '#3b82f6', fontSize: 10, fontWeight: 800 }}><FileCheck size={10} /> BATENDO</div>) : (<span style={{ fontSize: 10, color: 'var(--fg-faint)', fontWeight: 600 }}>NÃO ENCONTRADO</span>)}</td><td style={{ padding: '12px 20px' }}><span style={{ fontSize: 11, fontWeight: 600, color: item.statusType === 'danger' ? '#ef4444' : '#f59e0b' }}>{item.atraso}</span></td><td style={{ padding: '12px 20px', textAlign: 'right' }}><div style={{ fontSize: 13, fontWeight: 800, color: '#ef4444' }}>{item.valor}</div></td></tr>))}</tbody>
+                  </td><td style={{ padding: '12px 20px' }}>{item.hasProof ? (<div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(59,130,246,0.1)', color: '#3b82f6', fontSize: 10, fontWeight: 800 }}><FileCheck size={10} /> BATENDO</div>) : (<span style={{ fontSize: 10, color: 'var(--fg-faint)', fontWeight: 600 }}>NÃO ENCONTRADO</span>)}</td><td style={{ padding: '12px 20px' }}><span style={{ fontSize: 11, fontWeight: 600, color: item.statusType === 'danger' ? '#ef4444' : '#f59e0b' }}>{item.atraso}</span></td><td style={{ padding: '12px 20px', textAlign: 'right' }}><div style={{ fontSize: 13, fontWeight: 800, color: '#ef4444' }}>{item.valor}</div></td><td style={{ padding: '12px 20px', textAlign: 'center' }}>
+                    {item.conversationId ? (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await selectConversation(item.conversationId ?? null);
+                          const qs = item.proofMessageId ? `?msg=${item.proofMessageId}` : '';
+                          navigate(`/conversas${qs}`);
+                        }}
+                        title={item.proofMessageId ? 'Ver comprovante' : 'Abrir conversa'}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, background: item.hasProof ? 'rgba(59,130,246,0.12)' : 'var(--glass)', border: `1px solid ${item.hasProof ? 'rgba(59,130,246,0.35)' : 'var(--border)'}`, color: item.hasProof ? '#3b82f6' : 'var(--fg-muted)', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
+                      >
+                        <MessageSquare size={11} /> {item.hasProof ? 'COMPROVANTE' : 'CONVERSA'}
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 10, color: 'var(--fg-faint)' }}>—</span>
+                    )}
+                  </td></tr>))}</tbody>
                 </table>
               </div>
             </div>

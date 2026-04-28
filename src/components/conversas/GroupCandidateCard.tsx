@@ -20,7 +20,7 @@ type MembershipCheck = { alreadyMember: boolean; groupName: string | null; parti
 export function GroupCandidateCard({ conv }: { conv: Conversation }) {
   const [busy, setBusy] = useState<null | 'refresh' | 'mark_added' | 'dismiss' | 'check' | 'add'>(null);
   const [membership, setMembership] = useState<MembershipCheck>(null);
-  const [addResult, setAddResult] = useState<{ method?: string; inviteUrl?: string; error?: string } | null>(null);
+  const [addResult, setAddResult] = useState<{ method?: string; inviteUrl?: string; error?: string; hint?: string } | null>(null);
   // Default: colapsado (economiza espaço em 1366x768). Persiste preferência do usuário por conversa.
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     const stored = localStorage.getItem(`group-card-collapsed-${conv.id}`);
@@ -123,15 +123,37 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
         body: { action: 'add', conversationId: conv.id },
       });
       if (error || res?.error || res?.success === false) {
-        setAddResult({ error: (res?.error || error?.message || 'erro ao adicionar').toString() });
+        const raw = (res?.error || error?.message || 'erro ao adicionar').toString();
+        let friendly = raw;
+        if (raw === 'invite_code_failed') friendly = 'Bot não é admin do grupo. Use o link manual ou promova o Zevaldo a admin.';
+        if (raw === 'evolution_unreachable') friendly = 'Não consegui falar com a Evolution API agora. Tente novamente.';
+        if (raw === 'add_and_invite_failed') friendly = 'Não consegui adicionar nem gerar convite automático. Use o link manual.';
+        if (raw === 'group_full') friendly = 'Grupo cheio (limite WhatsApp). Crie um novo grupo.';
+        setAddResult({ error: friendly });
       } else {
-        setAddResult({ method: res.method, inviteUrl: res.inviteUrl });
-        useDashboardStore.setState((state) => ({
-          conversations: state.conversations.map((c) =>
-            c.id === conv.id ? { ...c, groupCandidateStatus: 'adicionada' } : c
-          ),
-        }));
-        await sendWelcomeMessage();
+        const method = String(res.method || '');
+        const inviteUrl = (res.inviteUrl || res.invite_url || null) as string | null;
+        setAddResult({
+          method,
+          inviteUrl: inviteUrl || undefined,
+          hint: method === 'manual_invite_link'
+            ? 'Convite automático falhou — copie o link manual.'
+            : method === 'invite_link_sent'
+            ? 'Convite enviado. Aguarde o cliente entrar e depois marque manualmente.'
+            : method === 'invite_link_available'
+            ? 'Não consegui enviar a mensagem, mas o link está disponível para copiar.'
+            : undefined,
+        });
+
+        // Regra: só marca como adicionada quando adicionou direto (ou já era membro).
+        if (method === 'added_direct' || method === 'already_member') {
+          useDashboardStore.setState((state) => ({
+            conversations: state.conversations.map((c) =>
+              c.id === conv.id ? { ...c, groupCandidateStatus: 'adicionada' } : c
+            ),
+          }));
+          await sendWelcomeMessage();
+        }
       }
     } finally { setBusy(null); }
   };
@@ -306,11 +328,35 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
             {addResult.error ? (
               <>Falhou: {addResult.error}</>
             ) : addResult.method === 'invite_link_sent' ? (
-              <>Adição direta não foi possível (privacidade do WhatsApp). Link de convite enviado ao cliente.</>
+              <>Adição direta não foi possível. Convite enviado. Aguardando confirmação.</>
+            ) : addResult.method === 'invite_link_available' ? (
+              <>Link de convite disponível para copiar. Aguardando confirmação.</>
+            ) : addResult.method === 'manual_invite_link' ? (
+              <>Link manual disponível para copiar. Aguardando confirmação.</>
             ) : (
               <>Adicionada ao grupo com sucesso.</>
             )}
           </span>
+        </div>
+      )}
+
+      {addResult?.inviteUrl && (addResult.method === 'invite_link_sent' || addResult.method === 'invite_link_available' || addResult.method === 'manual_invite_link') && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => { navigator.clipboard?.writeText(addResult.inviteUrl || '').catch(() => {}); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8,
+              background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)',
+              fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            }}
+            title="Copiar link do grupo"
+          >
+            <Copy size={12} />
+            Copiar link
+          </button>
+          {addResult.hint && (
+            <span style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{addResult.hint}</span>
+          )}
         </div>
       )}
 

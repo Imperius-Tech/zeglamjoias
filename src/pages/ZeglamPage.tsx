@@ -46,6 +46,7 @@ interface PendingCustomer {
   valor: string;
   salesId?: string;
   hasProof?: boolean;
+  matchTier?: 'phone_amount' | 'name_amount' | null;
   conversationId?: string;
   proofMessageId?: string;
 }
@@ -66,7 +67,7 @@ function parseAtrasoTimestamp(atraso: string): number {
 export default function ZeglamPage() {
   const navigate = useNavigate();
   const selectConversation = useDashboardStore(s => s.selectConversation);
-  const [activeTab, setActiveTab] = useState<'financeiro' | 'inadimplentes'>('inadimplentes');
+  const [activeTab, setActiveTab] = useState<'financeiro' | 'inadimplentes' | 'conferencia'>('inadimplentes');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -336,6 +337,7 @@ export default function ZeglamPage() {
         return {
           ...customer,
           hasProof: !!matched,
+          matchTier: rowResults[idx].matchTier,
           conversationId: matched?.convId ?? matchedConv?.id,
           proofMessageId: matched?.proof?.message_id,
         };
@@ -440,8 +442,53 @@ export default function ZeglamPage() {
         {/* Tabs - Removed "Acertos" */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 20, padding: 4, background: 'var(--glass)', borderRadius: 12, width: 'fit-content', border: '1px solid var(--border)' }}>
           <button onClick={() => setActiveTab('inadimplentes')} style={{ padding: '8px 16px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: activeTab === 'inadimplentes' ? 'var(--surface-2)' : 'transparent', color: activeTab === 'inadimplentes' ? 'var(--accent)' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>Inadimplentes ({pendingCustomers.length})</button>
+          <button onClick={() => setActiveTab('conferencia')} style={{ padding: '8px 16px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: activeTab === 'conferencia' ? 'var(--surface-2)' : 'transparent', color: activeTab === 'conferencia' ? 'var(--emerald-light)' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>Conferência ({pendingCustomers.filter(p => p.matchTier === 'phone_amount').length})</button>
           <button onClick={() => setActiveTab('financeiro')} style={{ padding: '8px 16px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: activeTab === 'financeiro' ? 'var(--surface-2)' : 'transparent', color: activeTab === 'financeiro' ? 'var(--accent)' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>Relatório Financeiro</button>
         </div>
+
+        {activeTab === 'conferencia' && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: '12px 14px', borderRadius: 10, background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.25)' }}>
+              <CheckCircle2 size={16} style={{ color: 'var(--emerald-light)' }} />
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-dim)' }}>
+                Pendentes com <strong>telefone E valor</strong> batendo (match forte). Tolerância valor: 1%. Comprovante já vinculado a conversa WhatsApp.
+              </p>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {pendingCustomers.filter(p => p.matchTier === 'phone_amount').length === 0 ? (
+                <div style={{ padding: 32, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13, background: 'var(--glass)', borderRadius: 12, border: '1px solid var(--border)' }}>
+                  Nenhum pendente com match forte de telefone + valor.
+                </div>
+              ) : (
+                pendingCustomers.filter(p => p.matchTier === 'phone_amount').map((p, i) => (
+                  <div key={p.salesId || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 10, background: 'var(--surface-2)', border: '1px solid rgba(16,185,129,0.2)' }}>
+                    <CheckCircle2 size={18} style={{ color: 'var(--emerald-light)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: 13, color: 'var(--strong-text)' }}>{p.cliente}</strong>
+                        <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>· {p.catalogo}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--fg-muted)', marginTop: 2 }}>
+                        <span><Clock size={10} style={{ display: 'inline', marginRight: 4 }} />{p.atraso}</span>
+                        <span style={{ color: 'var(--emerald-light)', fontWeight: 700 }}>{p.valor}</span>
+                      </div>
+                    </div>
+                    {p.conversationId && (
+                      <button onClick={async () => { await selectConversation(p.conversationId!); navigate('/conversas'); }} style={{ padding: '6px 12px', borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <MessageSquare size={12} /> Ver conversa
+                      </button>
+                    )}
+                    {p.salesId && (
+                      <button onClick={() => handleCustomerClick(p.salesId!)} style={{ padding: '6px 12px', borderRadius: 8, background: 'var(--accent)', color: '#fff', border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <FileCheck size={12} /> Detalhes
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
 
         {activeTab === 'inadimplentes' && (
           <>

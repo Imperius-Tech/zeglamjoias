@@ -121,7 +121,7 @@ export default function ZeglamPage() {
     return isNaN(n) ? null : n;
   };
 
-  const amountMatches = (zeglamValue: string, proofValue: string, tolerancePct = 0.05) => {
+  const amountMatches = (zeglamValue: string, proofValue: string, tolerancePct = 0.01) => {
     const a = parseBrlAmount(zeglamValue);
     const b = parseBrlAmount(proofValue);
     if (a == null || b == null || a <= 0 || b <= 0) return false;
@@ -221,7 +221,7 @@ export default function ZeglamPage() {
         };
       });
 
-      /** Telefone WhatsApp compatível + valor dentro da tolerância (prioridade). */
+      /** Telefone WhatsApp compatível + valor dentro da tolerância (best-match por menor diff). */
       const tryPhoneAndAmountMatch = (
         consumed: Set<string>,
         customer: any,
@@ -235,10 +235,18 @@ export default function ZeglamPage() {
             entry.phoneTail.length >= 8 &&
             (entry.phoneTail.endsWith(zeglamPhoneTail) || zeglamPhoneTail.endsWith(entry.phoneTail)),
         );
-        const matched = phoneNameCandidates.find((entry) =>
-          amountMatches(customer.valor, entry.detectedValue || ''),
-        );
-        return matched ?? null;
+        const zeglamAmount = parseBrlAmount(customer.valor);
+        if (zeglamAmount == null) return null;
+        let best: ProofIndexEntry | null = null;
+        let bestDiff = Infinity;
+        for (const entry of phoneNameCandidates) {
+          if (!amountMatches(customer.valor, entry.detectedValue || '')) continue;
+          const proofAmount = parseBrlAmount(entry.detectedValue || '');
+          if (proofAmount == null) continue;
+          const diff = Math.abs(proofAmount - zeglamAmount);
+          if (diff < bestDiff) { bestDiff = diff; best = entry; }
+        }
+        return best;
       };
 
       /** Nome alinhado (Zeglam / vínculo) + mesmo valor dentro da tolerança quando o telefone não cruza. */
@@ -249,13 +257,19 @@ export default function ZeglamPage() {
       ): ProofIndexEntry | null => {
         const variants = [customer.cliente as string | undefined, enrich?.customer_name || undefined];
         const free = proofIndex.filter((e) => !consumed.has(e.proofKey));
-        return (
-          free.find(
-            (entry) =>
-              nameFullyCompatibleWithProof(entry.proof?.customer_name || '', variants) &&
-              amountMatches(customer.valor, entry.detectedValue || ''),
-          ) ?? null
-        );
+        const zeglamAmount = parseBrlAmount(customer.valor);
+        if (zeglamAmount == null) return null;
+        let best: ProofIndexEntry | null = null;
+        let bestDiff = Infinity;
+        for (const entry of free) {
+          if (!nameFullyCompatibleWithProof(entry.proof?.customer_name || '', variants)) continue;
+          if (!amountMatches(customer.valor, entry.detectedValue || '')) continue;
+          const proofAmount = parseBrlAmount(entry.detectedValue || '');
+          if (proofAmount == null) continue;
+          const diff = Math.abs(proofAmount - zeglamAmount);
+          if (diff < bestDiff) { bestDiff = diff; best = entry; }
+        }
+        return best;
       };
 
       const debugMatches: any[] = [];

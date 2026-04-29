@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type CSSProperties } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { motion } from 'framer-motion';
@@ -19,9 +19,21 @@ interface MessageBubbleProps {
   message: Message;
   quotedMessage?: Message | null;
   onReply?: (msg: Message) => void;
+  /** Destaca a bolha quando o usuário chegou pela URL ?msg=id (painel/comprovante). */
+  proofSpotlight?: boolean;
 }
 
-export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBubbleProps) {
+const spotlightRowStyle = (on: boolean): CSSProperties | undefined =>
+  on
+    ? ({
+        outline: '2px solid rgba(59,130,246,0.85)',
+        outlineOffset: 4,
+        borderRadius: 12,
+        boxShadow: '0 0 24px rgba(59,130,246,0.25)',
+      } satisfies CSSProperties)
+    : undefined;
+
+export function MessageBubble({ message: m, quotedMessage, onReply, proofSpotlight }: MessageBubbleProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -46,7 +58,17 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
 
   if (m.author === 'sistema') {
     return (
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', justifyContent: 'center', padding: '8px 0' }}>
+      <motion.div
+        data-message-id={m.id}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          padding: '8px 0',
+          ...spotlightRowStyle(!!proofSpotlight),
+        }}
+      >
         <span style={{ padding: '4px 12px', borderRadius: 999, background: 'var(--glass)', border: '1px solid var(--border)', fontSize: 11, color: 'var(--fg-subtle)' }}>
           {m.content}
         </span>
@@ -144,8 +166,9 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
   // Sticker render
   if (isSticker && m.mediaUrl) {
     return (
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-        style={{ display: 'flex', justifyContent: isClient ? 'flex-start' : 'flex-end' }}
+      <motion.div data-message-id={m.id}
+        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+        style={{ display: 'flex', justifyContent: isClient ? 'flex-start' : 'flex-end', ...spotlightRowStyle(!!proofSpotlight) }}
         className="msg-row"
       >
         <div style={{ display: 'flex', alignItems: isClient ? 'flex-start' : 'flex-end', gap: 4 }}>
@@ -166,8 +189,9 @@ export function MessageBubble({ message: m, quotedMessage, onReply }: MessageBub
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-      style={{ display: 'flex', justifyContent: isClient ? 'flex-start' : 'flex-end' }}
+    <motion.div data-message-id={m.id}
+      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+      style={{ display: 'flex', justifyContent: isClient ? 'flex-start' : 'flex-end', ...spotlightRowStyle(!!proofSpotlight) }}
       className="msg-row"
     >
       <div style={{ maxWidth: '75%', display: 'flex', alignItems: 'flex-start', gap: 4 }}>

@@ -54,10 +54,10 @@ const automations: Automation[] = [
   },
   {
     id: 'template-entrada-grupo',
-    title: 'Template de entrada no grupo (4 bolhas)',
+    title: 'Template de entrada no grupo (bolhas WhatsApp)',
     category: 'grupo',
     status: 'ativo',
-    summary: 'Quando detecta que o cliente quer entrar no grupo de compras coletivas, manda a sequência padrão em 4 mensagens fragmentadas.',
+    summary: 'Template em knowledge_entries (atendimento) com item "* Vendedor que te indicou:"; a IA pergunta indicação só via esse item e não repete se o cliente já disse na conversa.',
     triggers: [
       'Cliente envia mensagem com intenção clara de entrar',
       'Regex: "quero entrar", "fui indicada", "amiga indicou", "grupo de compras coletivas", "participar do grupo" etc',
@@ -70,13 +70,13 @@ const automations: Automation[] = [
     ],
     actions: [
       'Marca status como "aguardando_dados" antes de começar (evita race)',
-      'Envia "Olá." → espera 1.5s → "Tudo bem?" → 1.8s → "Alguém indicou você?" → 2.2s → template estruturado com os 5 campos',
+      'Envia saudações + template (KB): lista com "* Vendedor que te indicou:"; system_prompt marca [ZEG_ENTRADA_GRUPO]: sem mensagem extra "Alguém indicou você?" se já citado',
       'Grava cada mensagem em messages com sent_by="ai" pra distinguir do atendente',
     ],
     edgeFunctions: ['send-group-intake-template', 'evolution-webhook'],
     tables: ['conversations (group_candidate_status)', 'messages'],
     notes: [
-      'As 4 mensagens chegam como 4 bolhas separadas no WhatsApp do cliente, com delays naturais entre elas',
+      'As mensagens podem chegar em bolhas separadas (conforme o modelo interpreta o texto da base)',
       'Se o cliente mandar outra mensagem no meio, a sequência continua normalmente',
     ],
   },

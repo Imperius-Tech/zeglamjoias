@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   RefreshCw, 
@@ -20,7 +20,12 @@ import {
   Package,
   TrendingUp,
   AlertTriangle,
-  Wallet
+  Wallet,
+  SlidersHorizontal,
+  ArrowDownWideNarrow,
+  History,
+  ChevronDown,
+  Check,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useDashboardStore } from '@/lib/store';
@@ -45,6 +50,19 @@ interface PendingCustomer {
   proofMessageId?: string;
 }
 
+/** DD/MM/AAAA (e horário opcional) vindos do scraping da coluna "Atraso". */
+function parseAtrasoTimestamp(atraso: string): number {
+  const m = String(atraso).trim().match(/(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2}))?/);
+  if (!m) return NaN;
+  const day = parseInt(m[1], 10);
+  const month = parseInt(m[2], 10) - 1;
+  const year = parseInt(m[3], 10);
+  const hh = m[4] !== undefined ? parseInt(m[4], 10) : 0;
+  const min = m[5] !== undefined ? parseInt(m[5], 10) : 0;
+  const t = new Date(year, month, day, hh, min, 0, 0).getTime();
+  return Number.isFinite(t) ? t : NaN;
+}
+
 export default function ZeglamPage() {
   const navigate = useNavigate();
   const selectConversation = useDashboardStore(s => s.selectConversation);
@@ -61,15 +79,32 @@ export default function ZeglamPage() {
   
   const [error, setError] = useState<string | null>(null);
   const [pendingFilter, setPendingFilter] = useState<'todos' | 'com_comprovante' | 'sem_comprovante'>('todos');
+  const [atrasoOrder, setAtrasoOrder] = useState<'recentes' | 'antigos'>('recentes');
+  /** Menu suspenso de ordenação (“gaveta” / dropdown). */
+  const [ordenMenuOpen, setOrdenMenuOpen] = useState(false);
+  const ordenMenuWrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!ordenMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (ordenMenuWrapRef.current?.contains(e.target as Node)) return;
+      setOrdenMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOrdenMenuOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [ordenMenuOpen]);
+
   const [searchText, setSearchText] = useState('');
 
   const normalize = (str: string) =>
     str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-
-  const firstName = (str: string | null | undefined) => {
-    if (!str) return "";
-    return normalize(str).split(/\s+/)[0] || "";
-  };
 
   const phoneTail = (str: string | null | undefined, n = 9) => {
     if (!str) return "";
@@ -94,6 +129,49 @@ export default function ZeglamPage() {
     return diff <= tolerancePct;
   };
 
+  /** Comprovante “totalmente compatível” por texto: mesmo nome cadastrado (Zeglam x WhatsApp x comprovante), sem depender só do telefone. */
+  const nameFullyCompatibleWithProof = (
+    proofCustomerName: string,
+    variants: Array<string | null | undefined>,
+  ): boolean => {
+    const pn = normalize(proofCustomerName || '');
+    if (pn.length < 2) return false;
+    for (const raw of variants) {
+      const zn = normalize(String(raw ?? ''));
+      if (!zn) continue;
+      if (zn === pn) return true;
+      if (zn.includes(pn) || pn.includes(zn)) return true;
+
+      const zTok = zn.split(/\s+/).filter((t) => t.length >= 2);
+      const pTok = pn.split(/\s+/).filter((t) => t.length >= 2);
+      if (!zTok.length || !pTok.length) continue;
+
+      const sharedExact = zTok.filter((t) => pTok.some((pt) => pt === t));
+      if (sharedExact.length >= 2) return true;
+
+      if (
+        zTok.length >= 2 &&
+        pTok.length >= 2 &&
+        zTok[0] === pTok[0] &&
+        zTok[zTok.length - 1] === pTok[pTok.length - 1]
+      ) return true;
+
+      const fuzzy = zTok.filter((t) =>
+        pTok.some((pt) => pt === t || pt.includes(t) || t.includes(pt)),
+      );
+      if (zTok.length >= 3 && pTok.length >= 3 && fuzzy.length >= 2) return true;
+    }
+    return false;
+  };
+
+  type ProofIndexEntry = {
+    proofKey: string;
+    proof: { customer_name?: string | null; message_id?: string; conversation_id?: string; detected_value?: string | null };
+    phoneTail: string;
+    convId?: string;
+    detectedValue?: string | null;
+  };
+
   const fetchData = async () => {
     setRefreshing(true);
     setError(null);
@@ -109,8 +187,8 @@ export default function ZeglamPage() {
 
       const [proofsRes, convsRes, phonesRes] = await Promise.all([
         supabase.from('payment_proofs')
-          .select('customer_name, message_id, conversation_id, detected_value, created_at')
-          .eq('status', 'pendente')
+          .select('id, customer_name, message_id, conversation_id, detected_value, created_at, status')
+          .neq('status', 'rejeitado')
           .order('created_at', { ascending: false }),
         supabase.from('conversations').select('id, customer_name, customer_phone'),
         salesIds.length > 0
@@ -122,61 +200,138 @@ export default function ZeglamPage() {
       const conversations = convsRes.data || [];
       const phonesMap: Record<string, { phone_digits: string | null; customer_name: string | null }> = phonesRes.data || {};
 
-      const proofIndex = proofs.map(p => {
+      const proofIndex: ProofIndexEntry[] = proofs.map((p: {
+        id?: string;
+        customer_name?: string | null;
+        message_id?: string;
+        conversation_id?: string;
+        detected_value?: string | null;
+      }) => {
         const conv = conversations.find(c => c.id === p.conversation_id);
+        const proofKey =
+          typeof p.id === 'string'
+            ? p.id
+            : `${p.conversation_id || ''}:${p.message_id || ''}`;
         return {
+          proofKey,
           proof: p,
           phoneTail: phoneTail(conv?.customer_phone),
-          firstName: firstName(p.customer_name),
           convId: p.conversation_id,
           detectedValue: p.detected_value,
         };
       });
 
-      const debugMatches: any[] = [];
-      const crossedPending = pendingList.map((customer: any) => {
-        const enrich = customer.salesId ? phonesMap[customer.salesId] : null;
+      /** Telefone WhatsApp compatível + valor dentro da tolerância (prioridade). */
+      const tryPhoneAndAmountMatch = (
+        consumed: Set<string>,
+        customer: any,
+        enrich: { phone_digits?: string | null; customer_name?: string | null } | null,
+      ): ProofIndexEntry | null => {
         const zeglamPhoneTail = phoneTail(enrich?.phone_digits || '');
+        if (zeglamPhoneTail.length < 8) return null;
+        const phoneNameCandidates = proofIndex.filter(
+          (entry) =>
+            !consumed.has(entry.proofKey) &&
+            entry.phoneTail.length >= 8 &&
+            (entry.phoneTail.endsWith(zeglamPhoneTail) || zeglamPhoneTail.endsWith(entry.phoneTail)),
+        );
+        const matched = phoneNameCandidates.find((entry) =>
+          amountMatches(customer.valor, entry.detectedValue || ''),
+        );
+        return matched ?? null;
+      };
 
-        let matched: any = null;
-        let phoneNameCandidates: any[] = [];
-        if (zeglamPhoneTail.length >= 8) {
-          phoneNameCandidates = proofIndex.filter(p =>
-            p.phoneTail.length >= 8 &&
-            (p.phoneTail.endsWith(zeglamPhoneTail) || zeglamPhoneTail.endsWith(p.phoneTail))
-          );
-          matched = phoneNameCandidates.find(p => amountMatches(customer.valor, p.detectedValue || ''));
+      /** Nome alinhado (Zeglam / vínculo) + mesmo valor dentro da tolerança quando o telefone não cruza. */
+      const tryNameAndAmountMatch = (
+        consumed: Set<string>,
+        customer: any,
+        enrich: { phone_digits?: string | null; customer_name?: string | null } | null,
+      ): ProofIndexEntry | null => {
+        const variants = [customer.cliente as string | undefined, enrich?.customer_name || undefined];
+        const free = proofIndex.filter((e) => !consumed.has(e.proofKey));
+        return (
+          free.find(
+            (entry) =>
+              nameFullyCompatibleWithProof(entry.proof?.customer_name || '', variants) &&
+              amountMatches(customer.valor, entry.detectedValue || ''),
+          ) ?? null
+        );
+      };
+
+      const debugMatches: any[] = [];
+      const consumedProofs = new Set<string>();
+
+      type RowResult = {
+        matched: ProofIndexEntry | null;
+        matchTier: null | 'phone_amount' | 'name_amount';
+        enrich: { phone_digits?: string | null; customer_name?: string | null } | null;
+      };
+
+      const rowResults = pendingList.map((customer: any): RowResult => {
+        const enrich = customer.salesId ? phonesMap[customer.salesId] : null;
+
+        let matched = tryPhoneAndAmountMatch(new Set(consumedProofs), customer, enrich);
+        let tier: RowResult['matchTier'] = null;
+        if (matched) tier = 'phone_amount';
+        else {
+          matched = tryNameAndAmountMatch(consumedProofs, customer, enrich);
+          if (matched) tier = 'name_amount';
         }
 
-        if (phoneNameCandidates.length > 0) {
+        if (matched) consumedProofs.add(matched.proofKey);
+
+        const enrichForDebug = enrich;
+        const zeglamPhoneTail = phoneTail(enrichForDebug?.phone_digits || '');
+        if (zeglamPhoneTail.length >= 8) {
+          const phoneNameCandidates = proofIndex.filter((p) =>
+            p.phoneTail.length >= 8 &&
+            (p.phoneTail.endsWith(zeglamPhoneTail) || zeglamPhoneTail.endsWith(p.phoneTail)),
+          );
           debugMatches.push({
-            zeglamName: enrich?.customer_name || customer.cliente,
-            zeglamPhone: enrich?.phone_digits,
+            zeglamName: enrichForDebug?.customer_name || customer.cliente,
+            zeglamPhone: enrichForDebug?.phone_digits,
             zeglamValue: customer.valor,
-            candidates: phoneNameCandidates.map(c => ({
+            matchTier: tier,
+            candidates: phoneNameCandidates.map((c) => ({
               proofName: c.proof?.customer_name,
               detectedValue: c.detectedValue,
               valueMatched: amountMatches(customer.valor, c.detectedValue || ''),
             })),
-            finalMatched: !!matched,
+            finalMatched: tier !== null,
           });
         }
 
-        const matchedConv = conversations.find(c => {
-          const cTail = phoneTail(c.customer_phone);
-          return cTail.length >= 8 && zeglamPhoneTail.length >= 8 &&
-            (cTail.endsWith(zeglamPhoneTail) || zeglamPhoneTail.endsWith(cTail));
-        });
+        return { matched, matchTier: tier, enrich };
+      });
+
+      const crossedPending = pendingList.map((customer: any, idx: number) => {
+        const enrich = rowResults[idx].enrich;
+        const matched = rowResults[idx].matched;
+        const zeglamPhoneTail = phoneTail(enrich?.phone_digits || '');
+
+        const matchedConv =
+          conversations.find((c) => {
+            const cTail = phoneTail(c.customer_phone);
+            return (
+              cTail.length >= 8 &&
+              zeglamPhoneTail.length >= 8 &&
+              (cTail.endsWith(zeglamPhoneTail) || zeglamPhoneTail.endsWith(cTail))
+            );
+          }) || null;
 
         return {
           ...customer,
           hasProof: !!matched,
-          conversationId: matched?.convId || matchedConv?.id,
-          proofMessageId: matched?.proof?.message_id
+          conversationId: matched?.convId ?? matchedConv?.id,
+          proofMessageId: matched?.proof?.message_id,
         };
       });
 
-      console.log('[Zeglam Match Debug]', { totalCandidatesByPhoneName: debugMatches.length, sample: debugMatches.slice(0, 30), allDebug: debugMatches });
+      console.log('[Zeglam Match Debug]', {
+        totalCandidatesByPhone: debugMatches.length,
+        consumedProofKeys: consumedProofs.size,
+        sample: debugMatches.slice(0, 30),
+      });
       setPayments(allData?.payments || []);
       setPendingCustomers(crossedPending);
     } catch (e: any) {
@@ -215,13 +370,34 @@ export default function ZeglamPage() {
     sem_comprovante: pendingCustomers.filter(c => !c.hasProof).length
   };
 
-  const filteredPending = pendingCustomers.filter(customer => {
-    const matchesSearch = normalize(customer.cliente).includes(normalize(searchText)) || 
-                          normalize(customer.catalogo).includes(normalize(searchText));
-    if (pendingFilter === 'com_comprovante') return matchesSearch && customer.hasProof;
-    if (pendingFilter === 'sem_comprovante') return matchesSearch && !customer.hasProof;
-    return matchesSearch;
-  });
+  const filteredPending = useMemo(() => {
+    const filtered = pendingCustomers.filter((customer) => {
+      const matchesSearch =
+        normalize(customer.cliente).includes(normalize(searchText)) ||
+        normalize(customer.catalogo).includes(normalize(searchText));
+      if (pendingFilter === 'com_comprovante') return matchesSearch && customer.hasProof;
+      if (pendingFilter === 'sem_comprovante') return matchesSearch && !customer.hasProof;
+      return matchesSearch;
+    });
+
+    const withSortKey = filtered.map((c, idx) => ({
+      row: c,
+      idx,
+      ts: parseAtrasoTimestamp(c.atraso),
+    }));
+
+    withSortKey.sort((a, b) => {
+      const parseBad = Number.isNaN(a.ts);
+      const parseBb = Number.isNaN(b.ts);
+      if (parseBad && parseBb) return a.idx - b.idx;
+      if (parseBad) return 1;
+      if (parseBb) return -1;
+      if (a.ts === b.ts) return a.idx - b.idx;
+      return atrasoOrder === 'recentes' ? b.ts - a.ts : a.ts - b.ts;
+    });
+
+    return withSortKey.map((x) => x.row);
+  }, [pendingCustomers, searchText, pendingFilter, atrasoOrder]);
 
   if (loading) return <div style={{ padding: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><Loader size={24} className="spin" style={{ color: 'var(--accent)' }} /></div>;
 
@@ -261,11 +437,167 @@ export default function ZeglamPage() {
                 <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-muted)' }} />
                 <input type="text" placeholder="Pesquisar cliente..." value={searchText} onChange={(e) => setSearchText(e.target.value)} style={{ width: '100%', padding: '8px 12px 8px 36px', borderRadius: 10, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--strong-text)', fontSize: 13 }} />
               </div>
-              
+
+              <div
+                ref={ordenMenuWrapRef}
+                style={{ position: 'relative', flexShrink: 0 }}
+                className="zeglam-orden-wrap"
+              >
+                <button
+                  type="button"
+                  aria-expanded={ordenMenuOpen}
+                  aria-haspopup="menu"
+                  onClick={() => setOrdenMenuOpen((v) => !v)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 12px',
+                    borderRadius: 10,
+                    background: ordenMenuOpen
+                      ? '#1c1c1f'
+                      : 'var(--glass)',
+                    border: `1px solid ${ordenMenuOpen ? 'rgba(212,175,55,0.45)' : 'var(--border)'}`,
+                    cursor: 'pointer',
+                    boxShadow: ordenMenuOpen
+                      ? '0 6px 20px rgba(0,0,0,0.25), inset 0 0 0 1px rgba(212,175,55,0.12)'
+                      : undefined,
+                  }}
+                >
+                  <SlidersHorizontal size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, textAlign: 'left' }}>
+                    <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.06em', color: 'var(--fg-subtle)', textTransform: 'uppercase' }}>
+                      Ordem do atraso
+                    </span>
+                    <span style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: 'var(--strong-text)',
+                      lineHeight: 1.15,
+                    }}>
+                      {atrasoOrder === 'recentes' ? (
+                        <><ArrowDownWideNarrow size={12} style={{ flexShrink: 0 }} /> Mais recentes</>
+                      ) : (
+                        <><History size={12} style={{ flexShrink: 0 }} /> Mais antigos</>
+                      )}
+                    </span>
+                  </div>
+                  <ChevronDown
+                    size={16}
+                    style={{
+                      flexShrink: 0,
+                      color: 'var(--fg-muted)',
+                      transition: 'transform 0.2s ease',
+                      transform: ordenMenuOpen ? 'rotate(-180deg)' : 'rotate(0)',
+                    }}
+                  />
+                </button>
+
+                {ordenMenuOpen && (
+                  <div
+                    role="menu"
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% - 4px)',
+                      right: 0,
+                      minWidth: 248,
+                      padding: '12px 6px 6px',
+                      borderRadius: 12,
+                      backgroundColor: '#18181b',
+                      backgroundImage: 'none',
+                      backdropFilter: 'none',
+                      WebkitBackdropFilter: 'none',
+                      isolation: 'isolate',
+                      border: '1px solid rgba(212,175,55,0.28)',
+                      boxShadow:
+                        '0 20px 48px rgba(0,0,0,0.75), inset 0 1px 0 rgba(255,255,255,0.06)',
+                      zIndex: 400,
+                      animation: 'zeglamOrdenIn 0.18s ease-out both',
+                    }}
+                  >
+                    <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.08em', color: 'var(--fg-faint)', textTransform: 'uppercase', padding: '4px 8px 8px' }}>
+                      Classificar pela data na coluna atraso
+                    </div>
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={atrasoOrder === 'recentes'}
+                      onClick={() => { setAtrasoOrder('recentes'); setOrdenMenuOpen(false); }}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        border: 'none',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        backgroundColor: '#18181b',
+                        backgroundImage:
+                          atrasoOrder === 'recentes'
+                            ? 'linear-gradient(135deg, rgba(212,175,55,0.22), rgba(212,175,55,0.07))'
+                            : 'none',
+                        color: atrasoOrder === 'recentes' ? 'var(--accent)' : 'var(--fg-dim)',
+                        fontWeight: 700,
+                        fontSize: 13,
+                      }}
+                    >
+                      <span style={{ flex: 1 }}>
+                        <span style={{ display: 'block', fontWeight: 800 }}>Mais recentes</span>
+                        <span style={{ display: 'block', marginTop: 2, fontSize: 11, fontWeight: 500, color: 'var(--fg-muted)', opacity: 0.95 }}>
+                          Data mais nova primeiro
+                        </span>
+                      </span>
+                      {atrasoOrder === 'recentes' ? <Check size={16} style={{ flexShrink: 0 }} /> : null}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={atrasoOrder === 'antigos'}
+                      onClick={() => { setAtrasoOrder('antigos'); setOrdenMenuOpen(false); }}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        border: 'none',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        marginTop: 2,
+                        backgroundColor: '#18181b',
+                        backgroundImage:
+                          atrasoOrder === 'antigos'
+                            ? 'linear-gradient(135deg, rgba(245,158,11,0.22), rgba(245,158,11,0.06))'
+                            : 'none',
+                        color: atrasoOrder === 'antigos' ? '#f59e0b' : 'var(--fg-dim)',
+                        fontWeight: 700,
+                        fontSize: 13,
+                      }}
+                    >
+                      <span style={{ flex: 1 }}>
+                        <span style={{ display: 'block', fontWeight: 800 }}>Mais antigos</span>
+                        <span style={{ display: 'block', marginTop: 2, fontSize: 11, fontWeight: 500, color: 'var(--fg-muted)', opacity: 0.95 }}>
+                          Quem atrasou há mais tempo primeiro
+                        </span>
+                      </span>
+                      {atrasoOrder === 'antigos' ? (
+                        <Check size={16} style={{ flexShrink: 0, color: '#f59e0b' }} />
+                      ) : null}
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <div style={{ display: 'flex', gap: 6, background: 'var(--glass)', padding: 4, borderRadius: 10, border: '1px solid var(--border)' }}>
                 <button onClick={() => setPendingFilter('todos')} style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: pendingFilter === 'todos' ? 'var(--surface-3)' : 'transparent', color: pendingFilter === 'todos' ? 'var(--strong-text)' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>TODOS</button>
                 <button onClick={() => setPendingFilter('com_comprovante')} style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: pendingFilter === 'com_comprovante' ? 'rgba(59,130,246,0.15)' : 'transparent', color: pendingFilter === 'com_comprovante' ? '#3b82f6' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>COM COMPROVANTE ({counts.com_comprovante})</button>
-                <button onClick={() => setPendingFilter('sem_comprovante')} style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: pendingFilter === 'sem_comprovante' ? 'rgba(239,68,68,0.1)' : 'transparent', color: pendingFilter === 'sem_comprovante' ? '#ef4444' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>SEM COMPROVANTE</button>
+                <button onClick={() => setPendingFilter('sem_comprovante')} style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: pendingFilter === 'sem_comprovante' ? 'rgba(239,68,68,0.1)' : 'transparent', color: pendingFilter === 'sem_comprovante' ? '#ef4444' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>SEM COMPROVANTE ({counts.sem_comprovante})</button>
               </div>
             </div>
 
@@ -510,6 +842,10 @@ export default function ZeglamPage() {
       <style>{`
         .spin { animation: spin 1s linear infinite; } 
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes zeglamOrdenIn {
+          from { opacity: 0; transform: translateY(-8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
         .customer-row:hover span { color: var(--accent) !important; text-decoration: underline; }
         
         .modal-solid-container {

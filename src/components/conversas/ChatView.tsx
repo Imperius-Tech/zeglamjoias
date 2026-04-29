@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { MessageSquare, Send, Phone, AlertTriangle, Loader, X, Reply, CheckCircle, Trash2, Bot, User, Power, Pencil, Brain, Sparkles } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDashboardStore } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
+import {
+  DEFAULT_GROUP_INTAKE_BUBBLES,
+  GROUP_INTAKE_KNOWLEDGE_ENTRY_IDS,
+  omitGroupIntakeVendorIfAlreadyMentioned,
+  splitGroupIntakeAnswerToBubbles,
+} from '@/lib/groupIntakeTemplate';
 import { MessageBubble } from './MessageBubble';
 import { GroupCandidateCard } from './GroupCandidateCard';
 import type { ConversationStatus, Message } from '@/lib/mock-data';
@@ -26,11 +32,16 @@ function pickGradient(n: string) { let h = 0; for (let i = 0; i < n.length; i++)
 
 export function ChatView() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const conversations = useDashboardStore((s) => s.conversations);
   const selectedId = useDashboardStore((s) => s.selectedConversationId);
   const instanceId = useDashboardStore((s) => s.activeInstanceId);
   const conv = conversations.find((c) => c.id === selectedId);
   const endRef = useRef<HTMLDivElement>(null);
+  /** Impede scroll automático até o final logo após abrir pela URL `?msg=` (painel → comprovante). */
+  const suppressBottomScrollUntilMs = useRef(0);
+  const proofDeepLinkAppliedKey = useRef<string>('');
+  const [spotlightProofMessageId, setSpotlightProofMessageId] = useState<string | null>(null);
   const [msgText, setMsgText] = useState('');
   const [aiGenerating, setAiGenerating] = useState(false);
   const [togglingAI, setTogglingAI] = useState(false);
@@ -39,8 +50,27 @@ export function ChatView() {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editingDraft, setEditingDraft] = useState<Message | null>(null);
   const [templateExpanded, setTemplateExpanded] = useState(false);
+  /** Bolhas do template de entrada no grupo — espelha `knowledge_entries` (atendimento / entrar no grupo). */
+  const [groupIntakeBubbles, setGroupIntakeBubbles] = useState<string[]>(() => [...DEFAULT_GROUP_INTAKE_BUBBLES]);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from('knowledge_entries')
+        .select('answer')
+        .in('id', [...GROUP_INTAKE_KNOWLEDGE_ENTRY_IDS])
+        .limit(1)
+        .maybeSingle();
+      if (!alive || error || !data?.answer) return;
+      setGroupIntakeBubbles(splitGroupIntakeAnswerToBubbles(data.answer));
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Tick de 500ms pra atualizar contador (buffer pendente OU draft com autoSendAt)
   useEffect(() => {
@@ -51,7 +81,80 @@ export function ChatView() {
     return () => clearInterval(id);
   }, [conv?.messages, conv?.pendingReplyAt]);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [conv?.messages.length, selectedId]);
+  useEffect(() => {
+    suppressBottomScrollUntilMs.current = 0;
+    proofDeepLinkAppliedKey.current = '';
+    setSpotlightProofMessageId(null);
+  }, [selectedId]);
+
+  const msgQuery = searchParams.get('msg');
+  /** Indica quando a mensagem alvo já está no estado local (lazy-load pode chegar alguns ticks depois). */
+  const proofAnchorLoaded =
+    !!(msgQuery && conv?.messagesLoaded &&
+      conv.messages.some((x) => !x.suggestionGroupId && x.id === msgQuery));
+
+  useEffect(() => {
+    const deepMsg = searchParams.get('msg');
+    if (
+      deepMsg ||
+      !(conv?.messagesLoaded) ||
+      !(conv?.messages?.length) ||
+      Date.now() < suppressBottomScrollUntilMs.current
+    ) return;
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [conv?.messagesLoaded, conv?.messages?.length, conv?.id, selectedId, searchParams]);
+
+  /** Deep link: /conversas?msg=<id da mensagem> — rolar até o comprovante e destacar */
+  useEffect(() => {
+    if (
+      !msgQuery ||
+      !conv ||
+      !conv.messagesLoaded ||
+      !conv.messages.length ||
+      conv.id !== selectedId ||
+      !proofAnchorLoaded
+    ) return;
+
+    const dupKey = `${conv.id}:${msgQuery}`;
+    if (proofDeepLinkAppliedKey.current === dupKey) return;
+
+    proofDeepLinkAppliedKey.current = dupKey;
+
+    const tid = window.setTimeout(() => {
+      const escaped =
+        typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+          ? CSS.escape(msgQuery)
+          : msgQuery.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const el = document.querySelector(`[data-message-id="${escaped}"]`);
+      suppressBottomScrollUntilMs.current = Date.now() + 9000;
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setSpotlightProofMessageId(msgQuery);
+      window.setTimeout(() => setSpotlightProofMessageId(null), 8200);
+      const clean = new URLSearchParams(searchParams);
+      clean.delete('msg');
+      setSearchParams(clean, { replace: true });
+    }, 160);
+    return () => window.clearTimeout(tid);
+  }, [
+    msgQuery,
+    proofAnchorLoaded,
+    conv?.messagesLoaded,
+    conv?.id,
+    selectedId,
+    searchParams,
+    setSearchParams,
+  ]);
+
+  /** Mensagem órfã na URL (histórico apagado, etc.) — só remove `msg` quando o load terminou */
+  useEffect(() => {
+    if (!(msgQuery && conv?.messagesLoaded === true && conv?.id === selectedId)) return;
+    if (!conv.messages.length) return;
+    if (conv.messages.some((x) => !x.suggestionGroupId && x.id === msgQuery)) return;
+    const clean = new URLSearchParams(searchParams);
+    clean.delete('msg');
+    proofDeepLinkAppliedKey.current = '';
+    setSearchParams(clean, { replace: true });
+  }, [msgQuery, conv?.messagesLoaded, conv?.messages?.length, conv?.id, selectedId, searchParams, setSearchParams]);
 
   // Nota: geração automática de sugestões e client-analysis acontecem no webhook v33
   // quando a mensagem do cliente chega (evolution-webhook -> evolution-ai-reply + evolution-client-analysis).
@@ -213,6 +316,7 @@ export function ChatView() {
               <MessageBubble
                 key={msg.id}
                 message={msg}
+                proofSpotlight={spotlightProofMessageId === msg.id}
                 quotedMessage={msg.quotedMessageId ? conv.messages.find((m) => m.id === msg.quotedMessageId) : null}
                 onReply={(m) => { setReplyTo(m); inputRef.current?.focus(); }}
               />
@@ -240,12 +344,11 @@ export function ChatView() {
         );
         if (alreadySent) return null;
 
-        const templates = [
-          'Olá 😊',
-          'Tudo bem?',
-          'Solicito, por gentileza, o envio das seguintes informações:\n\n• Nome completo:\n• Nome da marca:\n• Cidade:\n• Galvânica utilizada:\n\nVocê já participa de algum Grupo de Compras Coletivas?\nSe sim, poderia informar o nome?\n\nApós o registro dos dados, realizarei sua inclusão no grupo.',
-          'Alguém indicou você?',
-        ];
+        const customerBlob = conv.messages
+          .filter((m) => m.author === 'cliente')
+          .map((m) => String(m.content || ''))
+          .join('\n');
+        const templates = omitGroupIntakeVendorIfAlreadyMentioned(groupIntakeBubbles, customerBlob);
 
         const sendTemplate = async () => {
           for (const text of templates) {

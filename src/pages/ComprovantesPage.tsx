@@ -272,7 +272,14 @@ export default function ComprovantesPage() {
                   );
                 })()}
                 <button
-                  onClick={async () => { await selectConversation(selected.conversation_id); navigate('/conversas'); }}
+                  onClick={async () => {
+                    await selectConversation(selected.conversation_id);
+                    const qs = selected.message_id
+                      ? `?msg=${encodeURIComponent(selected.message_id)}`
+                      : '';
+                    navigate(`/conversas${qs}`);
+                  }}
+                  title={selected.message_id ? 'Ir para a mensagem do comprovante na conversa' : 'Abrir conversa'}
                   style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 6, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-muted)', fontSize: 11, cursor: 'pointer' }}
                 >
                   <MessageSquare size={10} /> Conversa

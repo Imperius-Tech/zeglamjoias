@@ -51,9 +51,9 @@ export default function ConfiguracoesPage() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
+    <div className="config-page-wrap" style={{ display: 'flex', height: '100%' }}>
       {/* Sidebar tabs */}
-      <nav style={{
+      <nav className="config-tabs" style={{
         width: 240, flexShrink: 0, height: '100%', overflowY: 'auto',
         padding: '28px 12px', borderRight: '1px solid var(--border)',
         background: 'var(--surface)',

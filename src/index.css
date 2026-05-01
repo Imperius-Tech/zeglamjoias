@@ -293,3 +293,82 @@ input::placeholder, textarea::placeholder {
 @media (min-width: 768px) {
   .mobile-back-btn { display: none !important; }
 }
+
+/* ===== ZeglamPage tabela → cards em mobile ===== */
+@media (max-width: 767px) {
+  .zeglam-page table {
+    display: block !important;
+    width: 100% !important;
+  }
+  .zeglam-page table thead { display: none !important; }
+  .zeglam-page table tbody { display: block !important; width: 100% !important; }
+  .zeglam-page table tbody tr {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    padding: 12px !important;
+    margin-bottom: 8px !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+    background: var(--surface-2) !important;
+    border-bottom: 1px solid var(--border) !important;
+  }
+  .zeglam-page table tbody td {
+    display: flex !important;
+    width: 100% !important;
+    padding: 4px 0 !important;
+    text-align: left !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    border: none !important;
+  }
+  .zeglam-page table tbody td:before {
+    content: attr(data-label);
+    font-size: 9px !important;
+    font-weight: 800 !important;
+    color: var(--fg-faint) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-right: 12px;
+  }
+}
+
+/* ===== ConfiguracoesPage sidebar tabs → horizontal scroll mobile ===== */
+@media (max-width: 767px) {
+  .config-page-wrap { flex-direction: column !important; }
+  .config-tabs {
+    width: 100% !important;
+    height: auto !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border) !important;
+    padding: 8px !important;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+  }
+  .config-tabs > p { display: none !important; }
+  .config-tabs > button {
+    flex-shrink: 0 !important;
+    width: auto !important;
+    padding: 8px 14px !important;
+    margin-right: 4px !important;
+    margin-bottom: 0 !important;
+    scroll-snap-align: start;
+  }
+  .config-content { padding: 16px !important; }
+}
+
+/* ===== ChatView ajustes mobile ===== */
+@media (max-width: 767px) {
+  .chat-context-ia { display: none !important; }
+  .chat-suggestions-panel .suggestion-card { width: 100% !important; }
+  .chat-input-row { padding: 8px 12px !important; padding-bottom: max(8px, env(safe-area-inset-bottom)) !important; }
+  .chat-header { height: 60px !important; padding: 0 12px !important; }
+  .chat-header-btn-label { display: none !important; }
+}
+
+/* ===== ConversationList compacta mobile ===== */
+@media (max-width: 767px) {
+  .conversation-list-panel > div:first-child { padding: 12px !important; }
+}

@@ -218,9 +218,9 @@ export default function InteressadosPage() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
+    <div className={`mobile-master-detail ${selectedId ? 'detail-active' : ''}`} style={{ display: 'flex', height: '100%' }}>
       {/* Left: List */}
-      <div style={{
+      <div className="master-pane" style={{
         width: 400, flexShrink: 0, height: '100%', display: 'flex', flexDirection: 'column',
         background: 'var(--surface)', borderRight: '1px solid var(--border)',
       }}>
@@ -346,7 +346,7 @@ export default function InteressadosPage() {
       </div>
 
       {/* Right: Detail */}
-      <div style={{ flex: 1, height: '100%', overflowY: 'auto' }}>
+      <div className={`detail-pane ${selected ? '' : 'detail-empty'}`} style={{ flex: 1, height: '100%', overflowY: 'auto' }}>
         {selected ? (
           <motion.div
             key={selected.id}
@@ -354,6 +354,14 @@ export default function InteressadosPage() {
             animate={{ opacity: 1, x: 0 }}
             style={{ padding: '32px 40px', maxWidth: 800, margin: '0 auto' }}
           >
+            {/* Mobile back btn */}
+            <button
+              onClick={() => setSelectedId(null)}
+              className="mobile-back-btn"
+              style={{ marginBottom: 16, padding: '8px 14px', borderRadius: 10, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)', fontSize: 13, fontWeight: 600, cursor: 'pointer', alignItems: 'center', gap: 6 }}
+            >
+              ← Voltar
+            </button>
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>

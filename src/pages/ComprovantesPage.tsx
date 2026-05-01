@@ -126,9 +126,9 @@ export default function ComprovantesPage() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
+    <div className={`mobile-master-detail ${selectedId ? 'detail-active' : ''}`} style={{ display: 'flex', height: '100%' }}>
       {/* Left: List */}
-      <div style={{
+      <div className="master-pane" style={{
         width: 400, flexShrink: 0, height: '100%', display: 'flex', flexDirection: 'column',
         background: 'var(--surface)', borderRight: '1px solid var(--border)',
       }}>
@@ -236,14 +236,22 @@ export default function ComprovantesPage() {
       </div>
 
       {/* Right: Detail */}
-      <div style={{ flex: 1, height: '100%', overflowY: 'auto' }}>
+      <div className={`detail-pane ${selected ? '' : 'detail-empty'}`} style={{ flex: 1, height: '100%', overflowY: 'auto' }}>
         {selected ? (
           <motion.div
             key={selected.id}
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
-            style={{ display: 'flex', height: '100%' }}
+            style={{ display: 'flex', height: '100%', flexDirection: 'column' }}
           >
+            <button
+              onClick={() => setSelectedId(null)}
+              className="mobile-back-btn"
+              style={{ margin: 12, padding: '8px 14px', borderRadius: 10, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)', fontSize: 13, fontWeight: 600, cursor: 'pointer', alignItems: 'center', gap: 6, alignSelf: 'flex-start' }}
+            >
+              ← Voltar
+            </button>
+            <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
             {/* Left: Document preview */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)', background: 'var(--surface)' }}>
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
@@ -378,6 +386,7 @@ export default function ComprovantesPage() {
                   </button>
                 )}
               </div>
+            </div>
             </div>
           </motion.div>
         ) : (

@@ -471,9 +471,9 @@ export default function ClientesPage() {
   const selectedConv = selectedId ? conversations.find((c) => c.id === selectedId) : null;
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
+    <div className={`mobile-master-detail ${selectedId ? 'detail-active' : ''}`} style={{ display: 'flex', height: '100%' }}>
       {/* Left: Client list */}
-      <div style={{
+      <div className="master-pane" style={{
         width: 360, flexShrink: 0, height: '100%', display: 'flex', flexDirection: 'column',
         background: 'var(--surface)', borderRight: '1px solid var(--border)',
       }}>
@@ -533,9 +533,18 @@ export default function ClientesPage() {
       </div>
 
       {/* Right: Client detail */}
-      <div style={{ flex: 1, height: '100%', overflowY: 'auto' }}>
+      <div className={`detail-pane ${selectedConv ? '' : 'detail-empty'}`} style={{ flex: 1, height: '100%', overflowY: 'auto' }}>
         {selectedConv ? (
-          <ClientDetail conv={selectedConv} onOpenChat={() => { selectConversation(selectedConv.id); navigate('/conversas'); }} />
+          <>
+            <button
+              onClick={() => setSelectedId(null)}
+              className="mobile-back-btn"
+              style={{ margin: 12, padding: '8px 14px', borderRadius: 10, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)', fontSize: 13, fontWeight: 600, cursor: 'pointer', alignItems: 'center', gap: 6 }}
+            >
+              ← Voltar
+            </button>
+            <ClientDetail conv={selectedConv} onOpenChat={() => { selectConversation(selectedConv.id); navigate('/conversas'); }} />
+          </>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 16 }}>
             <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}

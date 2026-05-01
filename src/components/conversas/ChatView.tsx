@@ -35,6 +35,7 @@ export function ChatView() {
   const [searchParams, setSearchParams] = useSearchParams();
   const conversations = useDashboardStore((s) => s.conversations);
   const selectedId = useDashboardStore((s) => s.selectedConversationId);
+  const selectConversation = useDashboardStore((s) => s.selectConversation);
   const instanceId = useDashboardStore((s) => s.activeInstanceId);
   const conv = conversations.find((c) => c.id === selectedId);
   const endRef = useRef<HTMLDivElement>(null);
@@ -182,6 +183,14 @@ export function ChatView() {
       <div className="chat-header" style={{ height: 72, display: 'flex', alignItems: 'center', padding: '0 20px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--header-bg)', backdropFilter: 'blur(12px)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button
+              onClick={() => selectConversation(null)}
+              className="mobile-back-btn"
+              title="Voltar"
+              style={{ padding: 6, borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)', cursor: 'pointer', alignItems: 'center' }}
+            >
+              ←
+            </button>
             {conv.profilePicUrl ? (
               <img src={conv.profilePicUrl} alt={conv.customerName} style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover' }} />
             ) : (

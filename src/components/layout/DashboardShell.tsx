@@ -1,10 +1,30 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { SandboxBanner } from './SandboxBanner';
 
+const isMobile = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches;
+
 export function DashboardShell({ children }: { children: ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Default: aberto em desktop, fechado em mobile
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isMobile());
+  const { pathname } = useLocation();
+
+  // Auto-close em mobile quando navega
+  useEffect(() => {
+    if (isMobile()) setSidebarOpen(false);
+  }, [pathname]);
+
+  // Re-sync ao redimensionar janela (ex: rotação ou resize)
+  useEffect(() => {
+    const onResize = () => {
+      const mobile = isMobile();
+      setSidebarOpen((cur) => (mobile ? false : cur || true));
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   return (
     <div className={sidebarOpen ? 'sidebar-open' : ''} style={{ height: '100vh', overflow: 'hidden', background: 'transparent' }}>

@@ -248,3 +248,48 @@ input::placeholder, textarea::placeholder {
 @media (min-width: 640px) {
   .show-sm { display: inline !important; }
 }
+
+/* ===== MOBILE UTILITIES (≤767px) ===== */
+@media (max-width: 767px) {
+  /* Páginas master-detail: lista full-width + content escondido por padrão */
+  .mobile-master-detail .master-pane { width: 100% !important; min-width: 0 !important; }
+  .mobile-master-detail .detail-pane.detail-empty { display: none !important; }
+
+  /* Quando detalhe selecionado, esconde master e mostra detail full-screen */
+  .mobile-master-detail.detail-active .master-pane { display: none !important; }
+  .mobile-master-detail.detail-active .detail-pane { display: flex !important; flex: 1 1 auto !important; width: 100% !important; }
+
+  /* Largura fluida pra painéis fixos */
+  .conversation-list-panel { width: 100% !important; min-width: 0 !important; }
+
+  /* Header em mobile compacta */
+  .header-breadcrumb-zeglam { display: none !important; }
+  .header-search { display: none !important; }
+
+  /* Sidebar overlay (sidebar já é fixed; em mobile cobre top) */
+  .sidebar-fixed { width: 280px !important; box-shadow: 0 0 32px rgba(0,0,0,0.5); }
+
+  /* Tabelas viram scroll horizontal */
+  .table-responsive { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+
+  /* Tabs ficam horizontal-scroll com snap */
+  .tabs-mobile-scroll {
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tabs-mobile-scroll > * { scroll-snap-align: start; flex-shrink: 0; }
+
+  /* Botão back mobile (aparece em detail-active) */
+  .mobile-back-btn { display: inline-flex !important; }
+
+  /* Padding seguro pra notch iOS */
+  .safe-area-top { padding-top: env(safe-area-inset-top); }
+  .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+/* Esconde botão back em desktop */
+@media (min-width: 768px) {
+  .mobile-back-btn { display: none !important; }
+}

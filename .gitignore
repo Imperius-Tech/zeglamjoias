@@ -7,6 +7,7 @@ dist
 .env
 .env.local
 .env.production
+supabase/.temp/
 .claude/
 docs/RELATORIO_FAQ_ZEVALDO.md
 .playwright-mcp/

@@ -1,7 +1,21 @@
-// 100 testes da INTENT_REGEX do group-candidate-extract
-// Roda local: npx ts-node scripts/test-intent-regex.ts
+// 100+ testes da INTENT_REGEX do group-candidate-extract (deploy em Supabase).
+// Roda local: npx tsx scripts/test-intent-regex.ts
+//
+// Coloquiais "me add no grupo" / "Poderia … add … grupo" falhavam na V11 — usar V12 em produção.
 
 const INTENT_REGEX_V11 = /(quero|gostaria|posso|como)\s+(de\s+)?(entrar|participar|fazer\s+parte|ingressar)|entrar\s+n[oe](?:\s+\S+)?\s+grupo|participar\s+d[oe](?:\s+\S+)?\s+grupo|fui\s+indicad[ao]|(?:uma?\s+)?(?:amiga?|amigo)\s+(?:me\s+)?indicou|indicou\s+(?:você|seu|seu\s+contato)|grupo\s+de\s+compras|compra(?:s)?\s+coletiva(?:s)?/i;
+
+/** V11 + coloquial WhatsApp / marca. Deve ser copiado para group-candidate-extract no Supabase. */
+const INTENT_REGEX_V12 = new RegExp(
+  INTENT_REGEX_V11.source +
+    '|(?:^|[\\s,.!?"])(?:me\\s+)?add\\s+(?:no|ao|em)\\s+grupo\\b|' +
+    'poderia\\s+(?:me\\s+)?(?:add|incluir|cadastr(?:ar|r)?|colocar|botar)\\s+(?:no|ao|em)\\s+grupo\\b|' +
+    '(?:^|[\\s,.!?"])(?:me\\s+)?adicion(?:a(?:r|-me)?|ei|ou)\\s+(?:no|ao|em)\\s+grupo\\b|' +
+    '(?:cadastr(?:o|ar|a))\\s+(?:no|em)\\s+grupo\\b|' +
+    '\\bno\\s+grupo\\s+zeglam\\b|' +
+    '\\b(?:grupo|grupos)\\s+zeglam\\b',
+  'i',
+);
 
 type Case = { msg: string; expected: boolean; note: string };
 
@@ -98,10 +112,10 @@ const TESTS: Case[] = [
   // ===== VARIACOES COLOQUIAIS =====
   { msg: 'queria entrar no grupo', expected: true, note: 'queria - pega pela parte entrar no grupo' },
   { msg: 'kero participar do grupo', expected: true, note: 'typo kero - pega pela parte participar do grupo' },
-  { msg: 'vc pode me add no grupo?', expected: false, note: 'add no grupo (nao padrao)' }, // gap
+  { msg: 'vc pode me add no grupo?', expected: true, note: 'add no grupo (V12)' },
   { msg: 'tenho interesse no grupo de compras', expected: true, note: 'interesse grupo compras (bate grupo de compras)' },
   { msg: 'interesse em participar do grupo', expected: true, note: 'interesse participar grupo' },
-  { msg: 'oi me adiciona no grupo?', expected: false, note: 'me adiciona (nao padrao)' }, // gap
+  { msg: 'oi me adiciona no grupo?', expected: true, note: 'me adiciona (V12)' },
   { msg: 'quero compras coletivas', expected: true, note: 'bate compras coletivas' },
   { msg: 'me add no grupo de compras', expected: true, note: 'bate grupo de compras' },
 
@@ -119,22 +133,29 @@ const TESTS: Case[] = [
   { msg: 'Oi, posso pagar o frete agora?', expected: false, note: 'real frete' },
   { msg: 'Boa tarde, o produto chegou com defeito', expected: false, note: 'real reclamacao' },
   { msg: 'Qual o valor do frete pra Campinas?', expected: false, note: 'real valor' },
+
+  // Caso relatado 2026-05: WhatsApp Business — não batia na V11
+  { msg: 'Poderia me add no grupo ZEGLAM?', expected: true, note: 'real poderia add zeglam' },
+  { msg: 'Indicação de Mabilia.', expected: false, note: 'só indicação sem grupo (multilinha depende do extract)' },
 ];
 
-let pass = 0, fail = 0;
-const failures: Case[] = [];
-
-for (const t of TESTS) {
-  const got = INTENT_REGEX_V11.test(t.msg);
-  if (got === t.expected) pass++;
-  else { fail++; failures.push(t); }
-}
-
-console.log(`\n====== RESULTADO: ${pass}/${TESTS.length} pass, ${fail} fail ======\n`);
-if (failures.length) {
-  console.log('FALHAS:');
-  for (const f of failures) {
-    const got = INTENT_REGEX_V11.test(f.msg);
-    console.log(`  [${f.note}] msg="${f.msg.slice(0, 70)}" expected=${f.expected} got=${got}`);
+function runSuite(name: string, rx: RegExp) {
+  let pass = 0;
+  const failures: Case[] = [];
+  for (const t of TESTS) {
+    const got = rx.test(t.msg);
+    if (got === t.expected) pass++;
+    else failures.push(t);
+  }
+  console.log(`\n====== ${name}: ${pass}/${TESTS.length} pass, ${failures.length} fail ======\n`);
+  if (failures.length) {
+    console.log('FALHAS:');
+    for (const f of failures) {
+      const got = rx.test(f.msg);
+      console.log(`  [${f.note}] msg="${f.msg.slice(0, 70)}" expected=${f.expected} got=${got}`);
+    }
   }
 }
+
+runSuite('INTENT_REGEX_V11 (legado)', INTENT_REGEX_V11);
+runSuite('INTENT_REGEX_V12 (recomendado)', INTENT_REGEX_V12);

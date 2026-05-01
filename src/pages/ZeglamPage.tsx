@@ -51,17 +51,52 @@ interface PendingCustomer {
   proofMessageId?: string;
 }
 
-/** DD/MM/AAAA (e horário opcional) vindos do scraping da coluna "Atraso". */
+/**
+ * Extrai data/hora da coluna "Atraso" (texto vindo do scrape do Zeglam).
+ * Aceita DD/MM/AAAA, traços, pontos, espaços ao redor de separadores e ISO AAAA-MM-DD.
+ */
 function parseAtrasoTimestamp(atraso: string): number {
-  const m = String(atraso).trim().match(/(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2}))?/);
-  if (!m) return NaN;
-  const day = parseInt(m[1], 10);
-  const month = parseInt(m[2], 10) - 1;
-  const year = parseInt(m[3], 10);
-  const hh = m[4] !== undefined ? parseInt(m[4], 10) : 0;
-  const min = m[5] !== undefined ? parseInt(m[5], 10) : 0;
-  const t = new Date(year, month, day, hh, min, 0, 0).getTime();
-  return Number.isFinite(t) ? t : NaN;
+  const s = String(atraso).trim().replace(/\u00a0/g, ' ');
+  if (!s) return NaN;
+
+  const fromDmy = (d: string, mo: string, y: string, hh?: string, mi?: string, sec?: string): number => {
+    const day = parseInt(d, 10);
+    const month = parseInt(mo, 10) - 1;
+    const year = parseInt(y, 10);
+    const h = hh !== undefined ? parseInt(hh, 10) : 0;
+    const m = mi !== undefined ? parseInt(mi, 10) : 0;
+    const s2 = sec !== undefined ? parseInt(sec, 10) : 0;
+    if ([day, month, year, h, m, s2].some((n) => Number.isNaN(n))) return NaN;
+    const t = new Date(year, month, day, h, m, s2, 0).getTime();
+    return Number.isFinite(t) ? t : NaN;
+  };
+
+  const fromYmd = (y: string, mo: string, d: string, hh?: string, mi?: string, sec?: string): number => {
+    return fromDmy(d, mo, y, hh, mi, sec);
+  };
+
+  let m = s.match(
+    /(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{4})(?:\s+(\d{1,2})\s*:\s*(\d{1,2})(?:\s*:\s*(\d{1,2}))?)?/,
+  );
+  if (m) return fromDmy(m[1], m[2], m[3], m[4], m[5], m[6]);
+
+  m = s.match(/(\d{1,2})\s*-\s*(\d{1,2})\s*-\s*(\d{4})(?:\s+(\d{1,2})\s*:\s*(\d{1,2})(?:\s*:\s*(\d{1,2}))?)?/);
+  if (m) return fromDmy(m[1], m[2], m[3], m[4], m[5], m[6]);
+
+  m = s.match(/(\d{4})\s*-\s*(\d{1,2})\s*-\s*(\d{1,2})(?:[T\s]+(\d{1,2})\s*:\s*(\d{1,2})(?:\s*:\s*(\d{1,2}))?)?/);
+  if (m) return fromYmd(m[1], m[2], m[3], m[4], m[5], m[6]);
+
+  m = s.match(/(\d{1,2})\s*\.\s*(\d{1,2})\s*\.\s*(\d{4})(?:\s+(\d{1,2})\s*:\s*(\d{1,2})(?:\s*:\s*(\d{1,2}))?)?/);
+  if (m) return fromDmy(m[1], m[2], m[3], m[4], m[5], m[6]);
+
+  return NaN;
+}
+
+/** Número estável só para empate na ordenação — nunca usa nome do cliente. */
+function pendingSortKeySid(salesId?: string): number {
+  if (!salesId) return NaN;
+  const n = parseInt(salesId, 10);
+  return Number.isFinite(n) ? n : NaN;
 }
 
 export default function ZeglamPage() {
@@ -400,16 +435,24 @@ export default function ZeglamPage() {
       row: c,
       idx,
       ts: parseAtrasoTimestamp(c.atraso),
+      sid: pendingSortKeySid(c.salesId),
     }));
 
     withSortKey.sort((a, b) => {
-      const parseBad = Number.isNaN(a.ts);
-      const parseBb = Number.isNaN(b.ts);
-      if (parseBad && parseBb) return a.idx - b.idx;
-      if (parseBad) return 1;
-      if (parseBb) return -1;
-      if (a.ts === b.ts) return a.idx - b.idx;
-      return atrasoOrder === 'recentes' ? b.ts - a.ts : a.ts - b.ts;
+      const aBad = Number.isNaN(a.ts);
+      const bBad = Number.isNaN(b.ts);
+      if (aBad && bBad) {
+        const asn = Number.isNaN(a.sid) ? a.idx : a.sid;
+        const bsn = Number.isNaN(b.sid) ? b.idx : b.sid;
+        return asn - bsn;
+      }
+      if (aBad) return 1;
+      if (bBad) return -1;
+      if (a.ts !== b.ts) {
+        return atrasoOrder === 'recentes' ? b.ts - a.ts : a.ts - b.ts;
+      }
+      if (!Number.isNaN(a.sid) && !Number.isNaN(b.sid) && a.sid !== b.sid) return a.sid - b.sid;
+      return a.idx - b.idx;
     });
 
     return withSortKey.map((x) => x.row);

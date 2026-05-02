@@ -12,7 +12,14 @@ serve(async (req) => {
   }
 
   try {
-    const { action, salesId } = await req.json()
+    const bodyJson = await req.json()
+    const { action, salesId, openAmount, totalPay, percentualEntrada } = bodyJson as {
+      action?: string
+      salesId?: string
+      openAmount?: string | number
+      totalPay?: string | number
+      percentualEntrada?: string | number
+    }
     
     let EMAIL = Deno.env.get('ZEGLAM_EMAIL')
     let PASSWORD = Deno.env.get('ZEGLAM_PASSWORD')
@@ -77,23 +84,62 @@ serve(async (req) => {
     Object.assign(jar, parseCookies(loginRes.headers))
     if (!jar['cookies-ctl']) throw new Error('Login failed')
 
-    // Helper to fetch views
+    const viewHeaders = () => ({
+      'User-Agent': UA,
+      'Accept': 'text/plain, */*; q=0.01',
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Referer': `${BASE}/`,
+      'Origin': 'https://zeglam.semijoias.net',
+      'Cookie': cookieHeader(jar),
+    })
+
+    // Helper to fetch views (JWT source inferred from path, except form-payment)
     const fetchView = async (path: string, params: Record<string, string> = {}) => {
       const jwtSource = path.includes('form-payment') ? 'virtualcatalog/form-payment' : path;
       const jwt = await getJwt(jwtSource)
       const res = await fetch(`${BASE}/services/view`, {
         method: 'POST',
-        headers: {
-          'User-Agent': UA,
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'X-Requested-With': 'XMLHttpRequest',
-          'Referer': `${BASE}/`,
-          'Origin': 'https://zeglam.semijoias.net',
-          'Cookie': cookieHeader(jar),
-        },
+        headers: viewHeaders(),
         body: new URLSearchParams({ JWT: jwt, Path: path, ...params }).toString(),
       })
-      return await res.text()
+      const text = await res.text()
+      Object.assign(jar, parseCookies(res.headers))
+      return text
+    }
+
+    /** Marcar como pago: o admin usa `POST .../services/virtualcatalog` (não `services/view`). */
+    const postVirtualCatalogSetAsPaid = async (
+      saleId: string,
+      openAmt: string,
+      totalAmt: string,
+      pct: string,
+    ) => {
+      const jwt = await getJwt('setAsPaid')
+      const params = new URLSearchParams({
+        VirtualCatalogSaleID: saleId,
+        OpenAmount: openAmt,
+        PercentualEntrada: pct,
+        TotalPay: totalAmt,
+        JWT: jwt,
+        Path: 'setAsPaid',
+      })
+      const res = await fetch(`${BASE}/services/virtualcatalog`, {
+        method: 'POST',
+        headers: viewHeaders(),
+        body: params.toString(),
+      })
+      const text = await res.text()
+      Object.assign(jar, parseCookies(res.headers))
+      return { ok: res.ok, status: res.status, text }
+    }
+
+    const looksLikeViewError = (html: string) => {
+      const slice = html.slice(0, 6000).toLowerCase()
+      return (
+        slice.includes('alert-danger') ||
+        /ocorreu um erro|erro ao processar|acesso negado|não autorizado|faça o login|faça login/.test(slice)
+      )
     }
 
     const scrapPending = (html: string) => {
@@ -172,6 +218,34 @@ serve(async (req) => {
       return details
     }
 
+    /** Converte texto tipo "R$ 1.234,56" ou "82,81" para número com ponto decimal (formato enviado ao Zeglam). */
+    const parseMoneyToApiNumber = (raw: string | undefined | null): string | null => {
+      if (raw == null) return null
+      const t = String(raw).replace(/\s/g, '').replace(/R\$/gi, '').trim()
+      if (!t) return null
+      let s = t
+      if (s.includes(',') && /\d{1,3}(\.\d{3})+,\d{2}$/.test(s)) {
+        s = s.replace(/\./g, '').replace(',', '.')
+      } else if (s.includes(',')) {
+        s = s.replace(',', '.')
+      }
+      const n = parseFloat(s)
+      if (!Number.isFinite(n)) return null
+      return String(n)
+    }
+
+    const amountFromClientOrDetails = (
+      v: string | number | undefined,
+      fallbackRaw: string | undefined,
+    ): string | null => {
+      if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+      if (typeof v === 'string' && v.trim()) {
+        const p = parseMoneyToApiNumber(v)
+        if (p) return p
+      }
+      return parseMoneyToApiNumber(fallbackRaw)
+    }
+
     if (action === 'get_all') {
       const [pendingHtml] = await Promise.all([
         fetchView('virtualcatalog/all-pending-customers')
@@ -188,6 +262,66 @@ serve(async (req) => {
       if (!salesId) throw new Error('salesId is required')
       const detailsHtml = await fetchView('virtualcatalog/form-payment', { VirtualCatalogSalesID: salesId })
       return new Response(JSON.stringify(scrapPaymentDetails(detailsHtml)), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    if (action === 'confirm_payment') {
+      if (!salesId) throw new Error('salesId is required')
+      const sid = String(salesId)
+      const formHtml = await fetchView('virtualcatalog/form-payment', { VirtualCatalogSalesID: sid })
+      const details = scrapPaymentDetails(formHtml)
+      const saldoRaw = details['Saldo Pendente']
+      const pctStr = String(percentualEntrada ?? '100')
+      const openStr = amountFromClientOrDetails(openAmount, saldoRaw)
+      const totalStr = amountFromClientOrDetails(totalPay, saldoRaw) ?? openStr
+      if (!openStr || !totalStr) {
+        throw new Error(
+          'Valores em aberto não encontrados. Abra o modal com detalhes ou envie openAmount/totalPay (número ou texto BRL).',
+        )
+      }
+
+      const isStillPending = async (): Promise<boolean> => {
+        const pendingHtml = await fetchView('virtualcatalog/all-pending-customers')
+        const rows = scrapPending(pendingHtml)
+        return rows.some((r) => String(r.salesId) === sid)
+      }
+
+      const r = await postVirtualCatalogSetAsPaid(sid, openStr, totalStr, pctStr)
+      const attemptLog = [
+        {
+          path: 'services/virtualcatalog',
+          jwtSource: 'setAsPaid',
+          variant: 'setAsPaid+VirtualCatalogSaleID',
+          status: r.status,
+          ok: r.ok,
+        },
+      ]
+      const last = { ok: r.ok, status: r.status, text: r.text, path: 'virtualcatalog→setAsPaid' }
+
+      let stillPending: boolean | undefined
+      let success = false
+      if (r.ok && !looksLikeViewError(r.text)) {
+        try {
+          stillPending = await isStillPending()
+          success = !stillPending
+        } catch {
+          stillPending = true
+        }
+      }
+      attemptLog[0] = { ...attemptLog[0], ...(stillPending !== undefined ? { stillPending } : {}) }
+
+      const stillInPendingList = r.ok && !looksLikeViewError(r.text) && stillPending === true
+
+      return new Response(
+        JSON.stringify({
+          success,
+          status: last.status,
+          pathUsed: last.path,
+          preview: (last.text ?? '').slice(0, 800),
+          attemptLog,
+          ...(stillInPendingList ? { stillInPendingList: true } : {}),
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
     }
 
     return new Response(JSON.stringify({ error: 'Invalid action' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })

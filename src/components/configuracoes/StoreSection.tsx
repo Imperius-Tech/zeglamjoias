@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Store } from 'lucide-react';
 import type { StoreSettings } from '@/lib/storage';
 import { FieldGroup, TextInput, SectionTitle, SaveButton } from './SettingsField';
@@ -9,6 +9,10 @@ export function StoreSection({ data, onSave }: { data: StoreSettings; onSave: (d
 
   const update = <K extends keyof StoreSettings>(k: K, v: StoreSettings[K]) =>
     setForm((prev) => ({ ...prev, [k]: v }));
+
+  useEffect(() => {
+    setForm(data);
+  }, [data]);
 
   const handleSave = () => {
     setSaving(true);
@@ -60,6 +64,26 @@ export function StoreSection({ data, onSave }: { data: StoreSettings; onSave: (d
         </FieldGroup>
         <FieldGroup label="Horário — Sábado">
           <TextInput value={form.scheduleSaturday} onChange={(v) => update('scheduleSaturday', v)} placeholder="09:00 - 13:00" />
+        </FieldGroup>
+        <FieldGroup
+          label="Chave PIX (cobrança automática)"
+          description="Aparece em «Dados para pagamento» nas mensagens de cobrar do dashboard Zeglam (mesmo padrão do romaneio no WhatsApp)."
+        >
+          <TextInput
+            value={form.pixKey}
+            onChange={(v) => update('pixKey', v)}
+            placeholder="Ex.: 48.441.153/0001-09 ou telefone com DDD"
+          />
+        </FieldGroup>
+        <FieldGroup
+          label="Nome do titular PIX"
+          description="Nome ou razão social exibido após «Nome:» na mesma linha de pagamento."
+        >
+          <TextInput
+            value={form.pixHolderName}
+            onChange={(v) => update('pixHolderName', v)}
+            placeholder="Ex.: Consultoria Z Gama (Zeglam Joias)"
+          />
         </FieldGroup>
       </div>
 

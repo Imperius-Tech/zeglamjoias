@@ -26,9 +26,12 @@ import {
   History,
   ChevronDown,
   Check,
+  Banknote,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useDashboardStore } from '@/lib/store';
+import { getSettings } from '@/lib/storage';
+import { buildZeglamCobrarWhatsAppText } from '@/lib/zeglamCobrarTemplate';
 
 interface Payment {
   link: string;
@@ -50,6 +53,9 @@ interface PendingCustomer {
   conversationId?: string;
   proofMessageId?: string;
 }
+
+const PAYMENT_CONFIRM_WHATSAPP =
+  'Olá! Confirmamos o recebimento do seu pagamento no sistema. Obrigado pela preferência!';
 
 /**
  * Extrai data/hora da coluna "Atraso" (texto vindo do scrape do Zeglam).
@@ -112,6 +118,16 @@ export default function ZeglamPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [paymentDetails, setPaymentDetails] = useState<Record<string, string> | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [modalSalesId, setModalSalesId] = useState<string | null>(null);
+  const [modalConversationId, setModalConversationId] = useState<string | null>(null);
+  /** Catálogo/link da linha inadimplente (para texto da cobrança no modal). */
+  const [modalCatalogo, setModalCatalogo] = useState<string | null>(null);
+  /** Chave da linha ou `zeglam-modal-cobrar` enquanto envia evolution-send. */
+  const [cobrarSendingKey, setCobrarSendingKey] = useState<string | null>(null);
+  const [confirmPaymentLoading, setConfirmPaymentLoading] = useState(false);
+  const [confirmPaymentError, setConfirmPaymentError] = useState<string | null>(null);
+  /** Só neste modal: enviar WhatsApp após confirmar pagamento no Zeglam. */
+  const [notifyWhatsAppOnZeglamConfirm, setNotifyWhatsAppOnZeglamConfirm] = useState(true);
   
   const [error, setError] = useState<string | null>(null);
   const [pendingFilter, setPendingFilter] = useState<'todos' | 'com_comprovante' | 'sem_comprovante'>('todos');
@@ -208,8 +224,9 @@ export default function ZeglamPage() {
     detectedValue?: string | null;
   };
 
-  const fetchData = async () => {
-    setRefreshing(true);
+  const fetchData = async (opts?: { quiet?: boolean }) => {
+    const quiet = opts?.quiet === true;
+    if (!quiet) setRefreshing(true);
     setError(null);
     try {
       const { data: allData, error: functionError } = await supabase.functions.invoke('zeglam-api', {
@@ -390,11 +407,71 @@ export default function ZeglamPage() {
       setError(e.message || 'Erro ao conectar com o sistema Zeglam.');
     } finally {
       setLoading(false);
-      setRefreshing(false);
+      if (!quiet) setRefreshing(false);
     }
   };
 
-  const handleCustomerClick = async (salesId: string) => {
+  const closePaymentModal = () => {
+    setIsModalOpen(false);
+    setModalSalesId(null);
+    setModalConversationId(null);
+    setModalCatalogo(null);
+    setConfirmPaymentError(null);
+    setConfirmPaymentLoading(false);
+    setPaymentDetails(null);
+    setDetailLoading(false);
+  };
+
+  const sendZeglamCobrarWhatsApp = async (opts: {
+    conversationId: string;
+    cliente: string;
+    catalogo?: string | null;
+    sendingKey: string;
+  }) => {
+    const { conversationId, cliente, catalogo, sendingKey } = opts;
+    const settings = await getSettings();
+    const pixKey = settings.store.pixKey?.trim() ?? '';
+    const pixHolderName = settings.store.pixHolderName?.trim() ?? '';
+    const payment =
+      pixKey && pixHolderName ? { pixKey, pixHolderName } : null;
+    const text = buildZeglamCobrarWhatsAppText(
+      cliente,
+      catalogo?.trim() ? catalogo.trim() : null,
+      payment,
+    );
+    const linkPreview = catalogo?.trim()
+      ? `«${catalogo.trim().slice(0, 120)}${catalogo.trim().length > 120 ? '…' : ''}»`
+      : 'texto genérico no link (sem catálogo na linha)';
+    const pixPreview = payment
+      ? `Dados de pagamento: Pix ${pixKey.slice(0, 28)}${pixKey.length > 28 ? '…' : ''} · ${pixHolderName.slice(0, 40)}${pixHolderName.length > 40 ? '…' : ''}`
+      : 'Sem dados de pagamento na mensagem (configure Chave PIX e Titular em Configurações → Perfil da Loja).';
+    if (
+      !window.confirm(
+        `Enviar mensagem de cobrança por WhatsApp para ${cliente}?\n\nCatálogo/link: ${linkPreview}\n\n${pixPreview}`,
+      )
+    )
+      return;
+    setCobrarSendingKey(sendingKey);
+    try {
+      const { error } = await supabase.functions.invoke('evolution-send', {
+        body: { conversationId, text },
+      });
+      if (error) throw error;
+    } catch (e) {
+      console.error('evolution-send cobrar (Zeglam):', e);
+      window.alert('Não foi possível enviar a cobrança. Verifique a instância Evolution e tente de novo.');
+    } finally {
+      setCobrarSendingKey(null);
+    }
+  };
+
+  const handleCustomerClick = async (salesId: string, conversationId?: string | null) => {
+    setModalSalesId(salesId);
+    setModalConversationId(conversationId ?? null);
+    const row = pendingCustomers.find((c) => String(c.salesId) === String(salesId));
+    setModalCatalogo(row?.catalogo ?? null);
+    setNotifyWhatsAppOnZeglamConfirm(true);
+    setConfirmPaymentError(null);
     setIsModalOpen(true);
     setDetailLoading(true);
     setPaymentDetails(null);
@@ -403,11 +480,90 @@ export default function ZeglamPage() {
         body: { action: 'get_payment_details', salesId } 
       });
       if (detailError) throw detailError;
-      setPaymentDetails(details);
+      setPaymentDetails(details as Record<string, string>);
     } catch (e) {
       console.error('Error fetching payment details:', e);
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const handleConfirmPayment = async () => {
+    if (!modalSalesId) return;
+    if (!paymentDetails?.['Saldo Pendente']) {
+      setConfirmPaymentError('Carregue os detalhes do pagamento antes de confirmar.');
+      return;
+    }
+    setConfirmPaymentLoading(true);
+    setConfirmPaymentError(null);
+    try {
+      const saldo = paymentDetails['Saldo Pendente'];
+      const { data, error } = await supabase.functions.invoke('zeglam-api', {
+        body: {
+          action: 'confirm_payment',
+          salesId: modalSalesId,
+          openAmount: saldo,
+          totalPay: saldo,
+          percentualEntrada: 100,
+        },
+      });
+      if (error) {
+        const body = data as { error?: string } | undefined;
+        throw new Error(body?.error || error.message);
+      }
+      const body = data as {
+        success?: boolean;
+        status?: number;
+        pathUsed?: string;
+        preview?: string;
+        stillInPendingList?: boolean;
+        attemptLog?: { path: string; jwtSource: string; variant?: string; status: number; ok: boolean; stillPending?: boolean }[];
+        error?: string;
+      };
+      if (body?.error) throw new Error(body.error);
+      if (!body?.success) {
+        if (body?.stillInPendingList) {
+          const logLine =
+            body.attemptLog
+              ?.map(
+                (a) =>
+                  `${a.variant || a.path} → ${a.status}${a.stillPending === true ? ' (ainda pendente)' : a.stillPending === false ? ' (ok)' : ''}`,
+              )
+              .join(' · ') ?? '';
+          throw new Error(
+            'O POST /services/virtualcatalog (setAsPaid) foi aceito, mas a venda ainda aparece como pendente. ' +
+              (logLine ? `Resumo: ${logLine}. ` : '') +
+              'Confirme no Zeglam se o valor enviado (saldo em aberto) coincide com o esperado.',
+          );
+        }
+        const logLine =
+          body?.attemptLog?.map((a) => `${a.variant || a.path} (${a.jwtSource}) → ${a.status}`).join(' · ') ?? '';
+        throw new Error(
+          `O Zeglam não confirmou o pagamento (HTTP ${body?.status ?? '?'}, ${body?.pathUsed ?? '?'}). ` +
+            (logLine ? `Detalhe: ${logLine}. ` : '') +
+            'Se o erro persistir, copie da Rede o POST **services/virtualcatalog** ao confirmar (Payload, JWT redigido).',
+        );
+      }
+      const confirmedSid = modalSalesId;
+      const waConvId = modalConversationId;
+      const sendWhatsApp = notifyWhatsAppOnZeglamConfirm;
+      closePaymentModal();
+      if (confirmedSid) {
+        setPendingCustomers((prev) => prev.filter((c) => String(c.salesId) !== String(confirmedSid)));
+      }
+      if (sendWhatsApp && waConvId) {
+        void supabase.functions
+          .invoke('evolution-send', {
+            body: { conversationId: waConvId, text: PAYMENT_CONFIRM_WHATSAPP },
+          })
+          .catch((waErr) => console.error('evolution-send after payment confirm:', waErr));
+      }
+      void fetchData({ quiet: true });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Erro ao confirmar pagamento.';
+      setConfirmPaymentError(msg);
+    } finally {
+      setConfirmPaymentLoading(false);
     }
   };
 
@@ -516,13 +672,51 @@ export default function ZeglamPage() {
                         <span style={{ color: 'var(--emerald-light)', fontWeight: 700 }}>{p.valor}</span>
                       </div>
                     </div>
-                    {p.conversationId && (
-                      <button onClick={async () => { await selectConversation(p.conversationId!); navigate('/conversas'); }} style={{ padding: '6px 12px', borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                        <MessageSquare size={12} /> Ver conversa
-                      </button>
-                    )}
+                    {p.conversationId ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, flexShrink: 0, justifyContent: 'flex-end' }}>
+                        <button onClick={async () => { await selectConversation(p.conversationId!); navigate('/conversas'); }} style={{ padding: '6px 12px', borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                          <MessageSquare size={12} /> Ver conversa
+                        </button>
+                        <button
+                          type="button"
+                          title="Enviar template de cobrança (WhatsApp)"
+                          disabled={!!cobrarSendingKey}
+                          onClick={() => {
+                            const key = `conf-${p.salesId ?? i}`;
+                            void sendZeglamCobrarWhatsApp({
+                              conversationId: p.conversationId!,
+                              cliente: p.cliente,
+                              catalogo: p.catalogo,
+                              sendingKey: key,
+                            });
+                          }}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: 8,
+                            background: 'rgba(251,191,36,0.12)',
+                            border: '1px solid rgba(251,191,36,0.4)',
+                            color: '#fbbf24',
+                            fontSize: 11,
+                            fontWeight: 700,
+                            cursor: cobrarSendingKey ? 'wait' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            flexShrink: 0,
+                            opacity: cobrarSendingKey && cobrarSendingKey !== `conf-${p.salesId ?? i}` ? 0.5 : 1,
+                          }}
+                        >
+                          {cobrarSendingKey === `conf-${p.salesId ?? i}` ? (
+                            <Loader size={12} className="spin" />
+                          ) : (
+                            <Banknote size={12} />
+                          )}
+                          Cobrar
+                        </button>
+                      </div>
+                    ) : null}
                     {p.salesId && (
-                      <button onClick={() => handleCustomerClick(p.salesId!)} style={{ padding: '6px 12px', borderRadius: 8, background: 'var(--accent)', color: '#fff', border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      <button onClick={() => handleCustomerClick(p.salesId!, p.conversationId)} style={{ padding: '6px 12px', borderRadius: 8, background: 'var(--accent)', color: '#fff', border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                         <FileCheck size={12} /> Detalhes
                       </button>
                     )}
@@ -711,30 +905,75 @@ export default function ZeglamPage() {
                   <thead><tr style={{ background: 'var(--surface-2)' }}><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase' }}>Cliente</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase' }}>Cruzamento</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase' }}>Atraso</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', textAlign: 'right' }}>Valor</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', textAlign: 'center' }}>Ações</th></tr></thead>
                   <tbody>{filteredPending.map((item, i) => (<tr key={i} style={{ borderBottom: i < filteredPending.length - 1 ? '1px solid var(--border)' : 'none' }}><td data-label="Cliente" style={{ padding: '12px 20px' }}>
                     <div
-                      onClick={() => item.salesId && handleCustomerClick(item.salesId)}
+                      onClick={() => item.salesId && handleCustomerClick(item.salesId, item.conversationId)}
                       style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: item.salesId ? 'pointer' : 'default' }}
                       className="customer-row"
                     >
                       <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(239,68,68,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}><UserX size={12} /></div>
                       <div><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)' }}>{item.cliente}</span><ChevronRight size={10} style={{ color: 'var(--fg-faint)' }} /></div><div style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>{item.catalogo}</div></div>
                     </div>
-                  </td><td data-label="Cruzamento" style={{ padding: '12px 20px' }}>{item.hasProof ? (item.matchTier === 'phone_amount' ? (<div title="Telefone WhatsApp + valor batendo (1%)" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(16,185,129,0.12)', color: 'var(--emerald-light)', fontSize: 10, fontWeight: 800, border: '1px solid rgba(16,185,129,0.3)' }}><FileCheck size={10} /> TEL + VALOR</div>) : item.matchTier === 'name_amount' ? (<div title="Nome no comprovante + valor batendo (1%) — telefone divergiu" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', fontSize: 10, fontWeight: 800, border: '1px solid rgba(245,158,11,0.3)' }}><FileCheck size={10} /> NOME + VALOR</div>) : (<div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(59,130,246,0.1)', color: '#3b82f6', fontSize: 10, fontWeight: 800 }}><FileCheck size={10} /> BATENDO</div>)) : (<span style={{ fontSize: 10, color: 'var(--fg-faint)', fontWeight: 600 }}>NÃO ENCONTRADO</span>)}</td><td data-label="Atraso" style={{ padding: '12px 20px' }}><span style={{ fontSize: 11, fontWeight: 600, color: item.statusType === 'danger' ? '#ef4444' : '#f59e0b' }}>{item.atraso}</span></td><td data-label="Valor" style={{ padding: '12px 20px', textAlign: 'right' }}><div style={{ fontSize: 13, fontWeight: 800, color: '#ef4444' }}>{item.valor}</div></td><td data-label="Ações" style={{ padding: '12px 20px', textAlign: 'center' }}>
-                    {item.conversationId ? (
-                      <button
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          await selectConversation(item.conversationId ?? null);
-                          const qs = item.proofMessageId ? `?msg=${item.proofMessageId}` : '';
-                          navigate(`/conversas${qs}`);
-                        }}
-                        title={item.proofMessageId ? 'Ver comprovante' : 'Abrir conversa'}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, background: item.hasProof ? 'rgba(59,130,246,0.12)' : 'var(--glass)', border: `1px solid ${item.hasProof ? 'rgba(59,130,246,0.35)' : 'var(--border)'}`, color: item.hasProof ? '#3b82f6' : 'var(--fg-muted)', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
-                      >
-                        <MessageSquare size={11} /> {item.hasProof ? 'COMPROVANTE' : 'CONVERSA'}
-                      </button>
-                    ) : (
-                      <span style={{ fontSize: 10, color: 'var(--fg-faint)' }}>—</span>
-                    )}
+                  </td><td data-label="Cruzamento" style={{ padding: '12px 20px' }}>{item.hasProof ? (item.matchTier === 'phone_amount' ? (<div title="Telefone WhatsApp + valor batendo (1%)" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(16,185,129,0.12)', color: 'var(--emerald-light)', fontSize: 10, fontWeight: 800, border: '1px solid rgba(16,185,129,0.3)' }}><FileCheck size={10} /> TEL + VALOR</div>) : item.matchTier === 'name_amount' ? (<div title="Nome no comprovante + valor batendo (1%) — telefone divergiu" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', fontSize: 10, fontWeight: 800, border: '1px solid rgba(245,158,11,0.3)' }}><FileCheck size={10} /> NOME + VALOR</div>) : (<div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(59,130,246,0.1)', color: '#3b82f6', fontSize: 10, fontWeight: 800 }}><FileCheck size={10} /> BATENDO</div>)) : (<span style={{ fontSize: 10, color: 'var(--fg-faint)', fontWeight: 600 }}>NÃO ENCONTRADO</span>)}</td><td data-label="Atraso" style={{ padding: '12px 20px' }}><span style={{ fontSize: 11, fontWeight: 600, color: item.statusType === 'danger' ? '#ef4444' : '#f59e0b' }}>{item.atraso}</span>                  </td><td data-label="Valor" style={{ padding: '12px 20px', textAlign: 'right' }}><div style={{ fontSize: 13, fontWeight: 800, color: '#ef4444' }}>{item.valor}</div></td><td data-label="Ações" style={{ padding: '12px 20px', textAlign: 'center' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+                      {item.conversationId ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              await selectConversation(item.conversationId ?? null);
+                              const qs = item.proofMessageId ? `?msg=${item.proofMessageId}` : '';
+                              navigate(`/conversas${qs}`);
+                            }}
+                            title={item.proofMessageId ? 'Ver comprovante' : 'Abrir conversa'}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, background: item.hasProof ? 'rgba(59,130,246,0.12)' : 'var(--glass)', border: `1px solid ${item.hasProof ? 'rgba(59,130,246,0.35)' : 'var(--border)'}`, color: item.hasProof ? '#3b82f6' : 'var(--fg-muted)', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
+                          >
+                            <MessageSquare size={11} /> {item.hasProof ? 'COMPROVANTE' : 'CONVERSA'}
+                          </button>
+                          <button
+                            type="button"
+                            title="Enviar template de cobrança (WhatsApp)"
+                            disabled={!!cobrarSendingKey}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const key = `inad-${String(item.salesId ?? '')}-${String(item.conversationId)}-${i}`;
+                              void sendZeglamCobrarWhatsApp({
+                                conversationId: item.conversationId!,
+                                cliente: item.cliente,
+                                catalogo: item.catalogo,
+                                sendingKey: key,
+                              });
+                            }}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              padding: '6px 10px',
+                              borderRadius: 8,
+                              background: 'rgba(251,191,36,0.12)',
+                              border: '1px solid rgba(251,191,36,0.4)',
+                              color: '#fbbf24',
+                              fontSize: 10,
+                              fontWeight: 800,
+                              cursor: cobrarSendingKey ? 'wait' : 'pointer',
+                              opacity:
+                                cobrarSendingKey &&
+                                cobrarSendingKey !== `inad-${String(item.salesId ?? '')}-${String(item.conversationId)}-${i}`
+                                  ? 0.45
+                                  : 1,
+                            }}
+                          >
+                            {cobrarSendingKey === `inad-${String(item.salesId ?? '')}-${String(item.conversationId)}-${i}` ? (
+                              <Loader size={11} className="spin" />
+                            ) : (
+                              <Banknote size={11} />
+                            )}
+                            COBRAR
+                          </button>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: 10, color: 'var(--fg-faint)' }}>—</span>
+                      )}
+                    </div>
                   </td></tr>))}</tbody>
                 </table>
               </div>
@@ -753,7 +992,7 @@ export default function ZeglamPage() {
             alignItems: 'center', 
             justifyContent: 'center',
             padding: 20
-          }} onClick={() => setIsModalOpen(false)}>
+          }} onClick={closePaymentModal}>
             
             <div 
                 className="modal-solid-container"
@@ -788,7 +1027,7 @@ export default function ZeglamPage() {
                         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--strong-text)' }}>Registrar Pagamento</h3>
                     </div>
                 </div>
-                <button onClick={() => setIsModalOpen(false)} style={{ background: '#252525', border: 'none', width: 32, height: 32, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff' }}>
+                <button onClick={closePaymentModal} style={{ background: '#252525', border: 'none', width: 32, height: 32, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff' }}>
                   <X size={18} />
                 </button>
               </div>
@@ -895,24 +1134,115 @@ export default function ZeglamPage() {
                          </div>
                       </div>
 
+                      {/* Enviar mensagem — checkbox simples (estilo formulário clássico) */}
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          cursor: confirmPaymentLoading ? 'default' : 'pointer',
+                          userSelect: 'none',
+                          padding: '6px 2px',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          className="zeglam-wa-checkbox"
+                          checked={notifyWhatsAppOnZeglamConfirm}
+                          disabled={confirmPaymentLoading}
+                          onChange={(e) => setNotifyWhatsAppOnZeglamConfirm(e.target.checked)}
+                        />
+                        <span style={{ fontSize: 14, fontWeight: 600, color: '#fafafa', letterSpacing: '0.01em' }}>
+                          Enviar mensagem
+                        </span>
+                      </label>
+                      {!modalConversationId ? (
+                        <p style={{ margin: '-2px 0 0 30px', fontSize: 11, fontWeight: 500, color: '#71717a' }}>
+                          Sem conversa WhatsApp nesta linha — mesmo marcado, não envia mensagem.
+                        </p>
+                      ) : null}
+
+                      <button
+                        type="button"
+                        disabled={!!cobrarSendingKey || !modalConversationId || detailLoading || !paymentDetails}
+                        onClick={() => {
+                          if (!modalConversationId || !paymentDetails) return;
+                          const cliente =
+                            paymentDetails['Cliente'] ||
+                            paymentDetails['Cliente/Telefone'] ||
+                            'Cliente';
+                          void sendZeglamCobrarWhatsApp({
+                            conversationId: modalConversationId,
+                            cliente: String(cliente),
+                            catalogo: modalCatalogo,
+                            sendingKey: 'zeglam-modal-cobrar',
+                          });
+                        }}
+                        title="Envia o template de cobrança sem confirmar pagamento no Zeglam"
+                        style={{
+                          width: '100%',
+                          padding: '12px 14px',
+                          borderRadius: 12,
+                          background: 'rgba(251,191,36,0.08)',
+                          border: '1px solid rgba(251,191,36,0.45)',
+                          color: '#fbbf24',
+                          fontSize: 13,
+                          fontWeight: 800,
+                          cursor:
+                            cobrarSendingKey || !modalConversationId || detailLoading || !paymentDetails
+                              ? 'not-allowed'
+                              : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 10,
+                          opacity: cobrarSendingKey && cobrarSendingKey !== 'zeglam-modal-cobrar' ? 0.45 : 1,
+                        }}
+                      >
+                        {cobrarSendingKey === 'zeglam-modal-cobrar' ? (
+                          <Loader size={18} className="spin" strokeWidth={2.5} />
+                        ) : (
+                          <Banknote size={18} strokeWidth={2.5} />
+                        )}
+                        Enviar cobrança (WhatsApp)
+                      </button>
+
                       {/* AÇÕES FINAIS */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                         <button style={{ 
+                         {confirmPaymentError ? (
+                           <div style={{ padding: '12px 14px', borderRadius: 12, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)', color: '#fecaca', fontSize: 12, fontWeight: 600, lineHeight: 1.45 }}>
+                             {confirmPaymentError}
+                           </div>
+                         ) : null}
+                         <button
+                           type="button"
+                           disabled={confirmPaymentLoading || !modalSalesId}
+                           onClick={() => void handleConfirmPayment()}
+                           style={{ 
                             padding: '14px', 
                             borderRadius: 12, 
-                            background: 'var(--accent)', 
+                            background: confirmPaymentLoading || !modalSalesId ? '#444' : 'var(--accent)', 
                             color: '#000', 
                             border: 'none', 
                             fontSize: 14, 
                             fontWeight: 900, 
-                            cursor: 'pointer',
+                            cursor: confirmPaymentLoading || !modalSalesId ? 'not-allowed' : 'pointer',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             gap: 10,
-                            transition: 'transform 0.2s'
+                            transition: 'transform 0.2s',
+                            opacity: confirmPaymentLoading || !modalSalesId ? 0.7 : 1,
                          }} className="btn-confirm">
-                            CONFIRMAR PAGAMENTO <ArrowRight size={18} strokeWidth={3} />
+                            {confirmPaymentLoading ? (
+                              <>
+                                <Loader size={18} className="spin" strokeWidth={2.5} /> A CONFIRMAR…
+                              </>
+                            ) : (
+                              <>
+                                CONFIRMAR PAGAMENTO <ArrowRight size={18} strokeWidth={3} />
+                              </>
+                            )}
                          </button>
                          <button style={{ 
                             padding: '10px', 
@@ -964,6 +1294,37 @@ export default function ZeglamPage() {
         .modal-solid-container ::-webkit-scrollbar { width: 6px; }
         .modal-solid-container ::-webkit-scrollbar-track { background: transparent; }
         .modal-solid-container ::-webkit-scrollbar-thumb { background: #333; borderRadius: 10px; }
+
+        /* Checkbox tipo formulário: caixa clara + visto ao marcar */
+        .modal-solid-container .zeglam-wa-checkbox {
+          appearance: none;
+          -webkit-appearance: none;
+          width: 20px;
+          height: 20px;
+          min-width: 20px;
+          margin: 0;
+          flex-shrink: 0;
+          border-radius: 5px;
+          border: 1.5px solid #a1a1aa;
+          background: #e4e4e7;
+          cursor: pointer;
+          transition: border-color 0.15s, background 0.15s;
+        }
+        .modal-solid-container .zeglam-wa-checkbox:hover:not(:disabled):not(:checked) {
+          border-color: #d4d4d8;
+          background: #f4f4f5;
+        }
+        .modal-solid-container .zeglam-wa-checkbox:checked {
+          border-color: var(--accent);
+          background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23090b0b' stroke-width='2.3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.2 6.4 11 12.5 4.8'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+        }
+        .modal-solid-container .zeglam-wa-checkbox:checked:hover:not(:disabled) {
+          filter: brightness(1.06);
+        }
+        .modal-solid-container .zeglam-wa-checkbox:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
       `}</style>
     </div>
   );

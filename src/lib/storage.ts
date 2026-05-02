@@ -10,6 +10,10 @@ export interface StoreSettings {
   scheduleWeekday: string;
   scheduleSaturday: string;
   logoUrl: string;
+  /** Chave PIX (telefone, e-mail ou CNPJ) — usada em mensagens automáticas de cobrança (Zeglam). */
+  pixKey: string;
+  /** Nome do titular / razão social exibido junto à chave PIX. */
+  pixHolderName: string;
 }
 
 export interface AISettings {
@@ -63,6 +67,8 @@ const defaults: AppSettings = {
     scheduleWeekday: '09:00 - 18:00',
     scheduleSaturday: '09:00 - 13:00',
     logoUrl: '',
+    pixKey: '',
+    pixHolderName: '',
   },
   ai: {
     tone: 'amigavel',

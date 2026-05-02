@@ -50,6 +50,14 @@ const statusConfig = {
 
 type FilterStatus = 'all' | 'pendente' | 'confirmado' | 'rejeitado';
 
+function buildProofConfirmedWhatsAppText(proof: PaymentProof): string {
+  const v = proof.detected_value?.trim();
+  if (v) {
+    return `Olá! Confirmamos o recebimento do seu comprovante de pagamento (${v}). Obrigado!`;
+  }
+  return 'Olá! Confirmamos o recebimento do seu comprovante de pagamento. Obrigado!';
+}
+
 export default function ComprovantesPage() {
   const navigate = useNavigate();
   const selectConversation = useDashboardStore((s) => s.selectConversation);
@@ -87,13 +95,28 @@ export default function ComprovantesPage() {
     setLoading(false);
   }
 
-  async function updateStatus(id: string, status: 'confirmado' | 'rejeitado', notes?: string) {
+  async function updateStatus(id: string, status: 'pendente' | 'confirmado' | 'rejeitado', notes?: string) {
     setUpdating(true);
-    await supabase.from('payment_proofs').update({
+    const proof = proofs.find((p) => p.id === id);
+    const { error } = await supabase.from('payment_proofs').update({
       status,
       notes: notes || null,
       confirmed_at: status === 'confirmado' ? new Date().toISOString() : null,
     }).eq('id', id);
+
+    if (error) {
+      console.error('payment_proofs update:', error);
+      setUpdating(false);
+      return;
+    }
+
+    if (status === 'confirmado' && proof?.conversation_id) {
+      const text = buildProofConfirmedWhatsAppText(proof);
+      void supabase.functions
+        .invoke('evolution-send', { body: { conversationId: proof.conversation_id, text } })
+        .catch((e) => console.error('evolution-send after proof confirm:', e));
+    }
+
     await loadProofs();
     setUpdating(false);
   }
@@ -377,7 +400,7 @@ export default function ComprovantesPage() {
                   </div>
                 )}
                 {selected.status !== 'pendente' && (
-                  <button onClick={() => updateStatus(selected.id, 'pendente' as any)} disabled={updating}
+                  <button onClick={() => updateStatus(selected.id, 'pendente')} disabled={updating}
                     style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 16px', borderRadius: 10,
                     background: 'var(--surface-3)', color: 'var(--fg-muted)',
                     fontSize: 12, fontWeight: 500, border: '1px solid var(--border)', cursor: 'pointer',

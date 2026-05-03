@@ -58,6 +58,19 @@ function buildProofConfirmedWhatsAppText(proof: PaymentProof): string {
   return 'Olá! Confirmamos o recebimento do seu comprovante de pagamento. Obrigado!';
 }
 
+function formatEvolutionSendFailure(data: unknown, invokeError: { message?: string } | null): string {
+  if (invokeError?.message) {
+    return `Falha ao chamar o envio: ${invokeError.message}`;
+  }
+  if (!data || typeof data !== 'object') return 'Resposta inválida do servidor de envio.';
+  const d = data as { error?: string; details?: { response?: { message?: unknown }; message?: unknown } };
+  if (!d.error) return 'Envio não concluído (sem detalhe).';
+  const inner = d.details?.response?.message ?? d.details?.message;
+  const innerStr = Array.isArray(inner) ? inner.join(' ') : inner != null ? String(inner) : '';
+  if (innerStr) return `${d.error}: ${innerStr}`;
+  return d.error;
+}
+
 export default function ComprovantesPage() {
   const navigate = useNavigate();
   const selectConversation = useDashboardStore((s) => s.selectConversation);
@@ -67,6 +80,12 @@ export default function ComprovantesPage() {
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  /** Erro ao enviar confirmação pelo WhatsApp após marcar comprovante (DB já atualizado). */
+  const [whatsappNotifyError, setWhatsappNotifyError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setWhatsappNotifyError(null);
+  }, [selectedId]);
 
   useEffect(() => {
     loadProofs();
@@ -97,6 +116,7 @@ export default function ComprovantesPage() {
 
   async function updateStatus(id: string, status: 'pendente' | 'confirmado' | 'rejeitado', notes?: string) {
     setUpdating(true);
+    setWhatsappNotifyError(null);
     const proof = proofs.find((p) => p.id === id);
     const { error } = await supabase.from('payment_proofs').update({
       status,
@@ -112,9 +132,20 @@ export default function ComprovantesPage() {
 
     if (status === 'confirmado' && proof?.conversation_id) {
       const text = buildProofConfirmedWhatsAppText(proof);
-      void supabase.functions
-        .invoke('evolution-send', { body: { conversationId: proof.conversation_id, text } })
-        .catch((e) => console.error('evolution-send after proof confirm:', e));
+      const { data: sendData, error: sendErr } = await supabase.functions.invoke('evolution-send', {
+        body: { conversationId: proof.conversation_id, text },
+      });
+      const payloadErr =
+        sendData && typeof sendData === 'object' && 'error' in sendData && (sendData as { error?: string }).error;
+      if (sendErr || payloadErr) {
+        const msg = formatEvolutionSendFailure(sendData, sendErr);
+        setWhatsappNotifyError(
+          `Comprovante salvo como confirmado, mas a mensagem no WhatsApp não foi enviada: ${msg}. Verifique a instância Evolution (sessão conectada).`,
+        );
+        console.error('evolution-send after proof confirm:', sendErr, sendData);
+      }
+    } else if (status === 'confirmado' && proof && !proof.conversation_id) {
+      setWhatsappNotifyError('Comprovante confirmado no sistema, mas não há conversa vinculada para enviar WhatsApp.');
     }
 
     await loadProofs();
@@ -384,6 +415,23 @@ export default function ComprovantesPage() {
                   </div>
                 )}
               </div>
+
+              {whatsappNotifyError && (
+                <div
+                  role="alert"
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    fontSize: 12,
+                    lineHeight: 1.45,
+                    color: '#fecaca',
+                    background: 'rgba(239,68,68,0.12)',
+                    border: '1px solid rgba(239,68,68,0.35)',
+                  }}
+                >
+                  {whatsappNotifyError}
+                </div>
+              )}
 
               {/* Actions */}
               <div style={{ marginTop: 'auto' }}>

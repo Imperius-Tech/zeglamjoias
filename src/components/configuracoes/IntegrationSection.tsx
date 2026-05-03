@@ -541,13 +541,30 @@ export function IntegrationSection() {
       return;
     }
     try {
-      const { data } = await supabase.functions.invoke('evolution-sync', {
+      const { data, error: fnErr } = await supabase.functions.invoke('evolution-sync', {
         body: { action: 'start', instanceName: targetInstance, maxChats: maxChatsInput },
       });
-      if (data?.jobId) {
-        setJob({ id: data.jobId, status: 'running', total_chats: 0, synced_chats: 0, total_messages: 0, total_media: 0, error: null, max_chats: maxChatsInput, started_at: new Date().toISOString(), current_step: 'fetching_chats' });
-        startPolling(data.jobId);
+      if (fnErr) {
+        const msg =
+          typeof fnErr.message === 'string' && fnErr.message.includes('Edge Function returned')
+            ? 'Falha na Edge evolution-sync (detalhes no dashboard Supabase ou na rede Evolution). '
+            + fnErr.message
+            : fnErr.message || String(fnErr);
+        setError(msg);
+        return;
       }
+      const bodyErr =
+        data && typeof data === 'object' && 'error' in data ? String((data as { error?: string }).error ?? '') : '';
+      if (bodyErr) {
+        setError(bodyErr);
+        return;
+      }
+      if (!data?.jobId) {
+        setError(typeof data === 'object' ? JSON.stringify(data).slice(0, 280) : 'Resposta sem jobId ao iniciar sync.');
+        return;
+      }
+      setJob({ id: data.jobId, status: 'running', total_chats: 0, synced_chats: 0, total_messages: 0, total_media: 0, error: null, max_chats: maxChatsInput, started_at: new Date().toISOString(), current_step: 'fetching_chats' });
+      startPolling(data.jobId);
     } catch (err: any) {
       setError(err.message || 'Erro ao iniciar sincronização');
     }

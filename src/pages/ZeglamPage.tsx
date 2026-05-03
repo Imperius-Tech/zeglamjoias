@@ -32,6 +32,13 @@ import { supabase } from '@/lib/supabase';
 import { useDashboardStore } from '@/lib/store';
 import { getSettings } from '@/lib/storage';
 import { buildZeglamCobrarWhatsAppText } from '@/lib/zeglamCobrarTemplate';
+import {
+  amountMatches,
+  nameFullyCompatibleWithProof,
+  normalize,
+  parseBrlAmount,
+  phoneTail,
+} from '@/lib/zeglamMatchUtils';
 
 interface Payment {
   link: string;
@@ -53,9 +60,6 @@ interface PendingCustomer {
   conversationId?: string;
   proofMessageId?: string;
 }
-
-const PAYMENT_CONFIRM_WHATSAPP =
-  'Olá! Confirmamos o recebimento do seu pagamento no sistema. Obrigado pela preferência!';
 
 /**
  * Extrai data/hora da coluna "Atraso" (texto vindo do scrape do Zeglam).
@@ -126,9 +130,10 @@ export default function ZeglamPage() {
   const [cobrarSendingKey, setCobrarSendingKey] = useState<string | null>(null);
   const [confirmPaymentLoading, setConfirmPaymentLoading] = useState(false);
   const [confirmPaymentError, setConfirmPaymentError] = useState<string | null>(null);
-  /** Só neste modal: enviar WhatsApp após confirmar pagamento no Zeglam. */
-  const [notifyWhatsAppOnZeglamConfirm, setNotifyWhatsAppOnZeglamConfirm] = useState(true);
-  
+  /** Quando marcado (default), o POST de confirmação segue o fluxo Zeglam sem parâmetros extras. Desmarcado: tenta suprimir aviso automático ao cliente. */
+  const [notifyZeglamCustomerOnConfirm, setNotifyZeglamCustomerOnConfirm] = useState(true);
+  /** Aviso após confirmar com “não notificar” sem campo detectável no HTML (configure secrets ou confira o form Zeglam). */
+  const [zeglamNotifyInfoBanner, setZeglamNotifyInfoBanner] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingFilter, setPendingFilter] = useState<'todos' | 'com_comprovante' | 'sem_comprovante'>('todos');
   const [atrasoOrder, setAtrasoOrder] = useState<'recentes' | 'antigos'>('recentes');
@@ -154,67 +159,6 @@ export default function ZeglamPage() {
   }, [ordenMenuOpen]);
 
   const [searchText, setSearchText] = useState('');
-
-  const normalize = (str: string) =>
-    str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-
-  const phoneTail = (str: string | null | undefined, n = 9) => {
-    if (!str) return "";
-    const digits = str.replace(/\D/g, "");
-    return digits.slice(-n);
-  };
-
-  const parseBrlAmount = (str: string | null | undefined): number | null => {
-    if (!str) return null;
-    const m = str.match(/R\$?\s*([\d.,]+)/i);
-    const raw = m ? m[1] : str;
-    const cleaned = raw.replace(/\./g, '').replace(',', '.').replace(/[^\d.]/g, '');
-    const n = parseFloat(cleaned);
-    return isNaN(n) ? null : n;
-  };
-
-  const amountMatches = (zeglamValue: string, proofValue: string, tolerancePct = 0.01) => {
-    const a = parseBrlAmount(zeglamValue);
-    const b = parseBrlAmount(proofValue);
-    if (a == null || b == null || a <= 0 || b <= 0) return false;
-    const diff = Math.abs(a - b) / a;
-    return diff <= tolerancePct;
-  };
-
-  /** Comprovante “totalmente compatível” por texto: mesmo nome cadastrado (Zeglam x WhatsApp x comprovante), sem depender só do telefone. */
-  const nameFullyCompatibleWithProof = (
-    proofCustomerName: string,
-    variants: Array<string | null | undefined>,
-  ): boolean => {
-    const pn = normalize(proofCustomerName || '');
-    if (pn.length < 2) return false;
-    for (const raw of variants) {
-      const zn = normalize(String(raw ?? ''));
-      if (!zn) continue;
-      if (zn === pn) return true;
-      if (zn.includes(pn) || pn.includes(zn)) return true;
-
-      const zTok = zn.split(/\s+/).filter((t) => t.length >= 2);
-      const pTok = pn.split(/\s+/).filter((t) => t.length >= 2);
-      if (!zTok.length || !pTok.length) continue;
-
-      const sharedExact = zTok.filter((t) => pTok.some((pt) => pt === t));
-      if (sharedExact.length >= 2) return true;
-
-      if (
-        zTok.length >= 2 &&
-        pTok.length >= 2 &&
-        zTok[0] === pTok[0] &&
-        zTok[zTok.length - 1] === pTok[pTok.length - 1]
-      ) return true;
-
-      const fuzzy = zTok.filter((t) =>
-        pTok.some((pt) => pt === t || pt.includes(t) || t.includes(pt)),
-      );
-      if (zTok.length >= 3 && pTok.length >= 3 && fuzzy.length >= 2) return true;
-    }
-    return false;
-  };
 
   type ProofIndexEntry = {
     proofKey: string;
@@ -420,6 +364,7 @@ export default function ZeglamPage() {
     setConfirmPaymentLoading(false);
     setPaymentDetails(null);
     setDetailLoading(false);
+    setNotifyZeglamCustomerOnConfirm(true);
   };
 
   const sendZeglamCobrarWhatsApp = async (opts: {
@@ -470,8 +415,9 @@ export default function ZeglamPage() {
     setModalConversationId(conversationId ?? null);
     const row = pendingCustomers.find((c) => String(c.salesId) === String(salesId));
     setModalCatalogo(row?.catalogo ?? null);
-    setNotifyWhatsAppOnZeglamConfirm(true);
     setConfirmPaymentError(null);
+    setNotifyZeglamCustomerOnConfirm(true);
+    setZeglamNotifyInfoBanner(null);
     setIsModalOpen(true);
     setDetailLoading(true);
     setPaymentDetails(null);
@@ -505,6 +451,7 @@ export default function ZeglamPage() {
           openAmount: saldo,
           totalPay: saldo,
           percentualEntrada: 100,
+          notifyCustomer: notifyZeglamCustomerOnConfirm,
         },
       });
       if (error) {
@@ -517,6 +464,7 @@ export default function ZeglamPage() {
         pathUsed?: string;
         preview?: string;
         stillInPendingList?: boolean;
+        clientNotifySuppressionUnconfigured?: boolean;
         attemptLog?: { path: string; jwtSource: string; variant?: string; status: number; ok: boolean; stillPending?: boolean }[];
         error?: string;
       };
@@ -545,18 +493,16 @@ export default function ZeglamPage() {
         );
       }
       const confirmedSid = modalSalesId;
-      const waConvId = modalConversationId;
-      const sendWhatsApp = notifyWhatsAppOnZeglamConfirm;
+      if (body?.clientNotifySuppressionUnconfigured) {
+        setZeglamNotifyInfoBanner(
+          'Pagamento registrado. Não foi possível garantir que o aviso automático ao cliente fique desligado — ele pode ainda ser enviado.',
+        );
+      } else {
+        setZeglamNotifyInfoBanner(null);
+      }
       closePaymentModal();
       if (confirmedSid) {
         setPendingCustomers((prev) => prev.filter((c) => String(c.salesId) !== String(confirmedSid)));
-      }
-      if (sendWhatsApp && waConvId) {
-        void supabase.functions
-          .invoke('evolution-send', {
-            body: { conversationId: waConvId, text: PAYMENT_CONFIRM_WHATSAPP },
-          })
-          .catch((waErr) => console.error('evolution-send after payment confirm:', waErr));
       }
       void fetchData({ quiet: true });
     } catch (e: unknown) {
@@ -637,6 +583,41 @@ export default function ZeglamPage() {
         </div>
 
         {error && <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}><AlertCircle size={18} /><p style={{ margin: 0, fontSize: 12 }}>{error}</p></div>}
+        {zeglamNotifyInfoBanner && (
+          <div
+            style={{
+              padding: '12px 16px',
+              borderRadius: 10,
+              background: 'rgba(251,191,36,0.1)',
+              border: '1px solid rgba(251,191,36,0.35)',
+              color: '#fbbf24',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              marginBottom: 20,
+            }}
+          >
+            <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+            <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5 }}>{zeglamNotifyInfoBanner}</p>
+            <button
+              type="button"
+              onClick={() => setZeglamNotifyInfoBanner(null)}
+              aria-label="Fechar aviso"
+              style={{
+                marginLeft: 'auto',
+                flexShrink: 0,
+                background: 'transparent',
+                border: 'none',
+                color: '#fbbf24',
+                cursor: 'pointer',
+                padding: 4,
+                lineHeight: 1,
+              }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
 
         {/* Tabs - Removed "Acertos" */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 20, padding: 4, background: 'var(--glass)', borderRadius: 12, width: 'fit-content', border: '1px solid var(--border)' }}>
@@ -1134,33 +1115,37 @@ export default function ZeglamPage() {
                          </div>
                       </div>
 
-                      {/* Enviar mensagem — checkbox simples (estilo formulário clássico) */}
-                      <label
+                      <div
                         style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                          cursor: confirmPaymentLoading ? 'default' : 'pointer',
-                          userSelect: 'none',
-                          padding: '6px 2px',
+                          padding: '14px 16px',
+                          borderRadius: 12,
+                          background: '#151515',
+                          border: '1px solid rgba(212,212,216,0.35)',
                         }}
                       >
-                        <input
-                          type="checkbox"
-                          className="zeglam-wa-checkbox"
-                          checked={notifyWhatsAppOnZeglamConfirm}
-                          disabled={confirmPaymentLoading}
-                          onChange={(e) => setNotifyWhatsAppOnZeglamConfirm(e.target.checked)}
-                        />
-                        <span style={{ fontSize: 14, fontWeight: 600, color: '#fafafa', letterSpacing: '0.01em' }}>
-                          Enviar mensagem
-                        </span>
-                      </label>
-                      {!modalConversationId ? (
-                        <p style={{ margin: '-2px 0 0 30px', fontSize: 11, fontWeight: 500, color: '#71717a' }}>
-                          Sem conversa WhatsApp nesta linha — mesmo marcado, não envia mensagem.
-                        </p>
-                      ) : null}
+                        <label
+                          style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 12,
+                            cursor: confirmPaymentLoading ? 'not-allowed' : 'pointer',
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: '#f4f4f5',
+                            lineHeight: 1.45,
+                            margin: 0,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            className="zeglam-wa-checkbox"
+                            checked={notifyZeglamCustomerOnConfirm}
+                            onChange={(e) => setNotifyZeglamCustomerOnConfirm(e.target.checked)}
+                            disabled={confirmPaymentLoading}
+                          />
+                          <span>Enviar mensagem automática ao cliente pelo Zeglam ao confirmar o pagamento.</span>
+                        </label>
+                      </div>
 
                       <button
                         type="button"

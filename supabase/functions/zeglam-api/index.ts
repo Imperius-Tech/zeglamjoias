@@ -13,12 +13,15 @@ serve(async (req) => {
 
   try {
     const bodyJson = await req.json()
-    const { action, salesId, openAmount, totalPay, percentualEntrada } = bodyJson as {
+    const { action, salesId, openAmount, totalPay, percentualEntrada, salesIds, notifyCustomer } = bodyJson as {
       action?: string
       salesId?: string
       openAmount?: string | number
       totalPay?: string | number
       percentualEntrada?: string | number
+      salesIds?: string[]
+      /** Quando `false`, tenta enviar ao Zeglam os parâmetros que desativam aviso ao cliente (env / HTML do form-payment). Default: true. */
+      notifyCustomer?: boolean
     }
     
     let EMAIL = Deno.env.get('ZEGLAM_EMAIL')
@@ -108,12 +111,45 @@ serve(async (req) => {
       return text
     }
 
+    /** Tenta extrair do HTML do form-payment o campo (checkbox/hidden) ligado a notificar cliente, para POST sem aviso. */
+    const scrapeClientNotifySuppressionExtras = (
+      formHtml: string,
+    ): { extras: Record<string, string>; source: 'scraped' | 'none' } => {
+      const keyword = /whatsapp|notif|notifica|enviar|mensagem|avisar|comunica/i
+      for (const m of formHtml.matchAll(/<input\b([^>]*)\/?>/gi)) {
+        const attrs = m[1]
+        const type = (/type=["']([^"']*)["']/i.exec(attrs)?.[1] || '').toLowerCase()
+        if (type !== 'checkbox') continue
+        const name = /name=["']([^"']+)["']/i.exec(attrs)?.[1]
+        if (!name) continue
+        const id = /id=["']([^"']+)["']/i.exec(attrs)?.[1]
+        let snippet = attrs + '>'
+        if (id) {
+          const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          const lab = formHtml.match(new RegExp(`<label\\b[^>]*for=["']${esc}["'][^>]*>([\\s\\S]{0,220})`, 'i'))
+          if (lab) snippet += lab[1]
+        }
+        if (!keyword.test(name) && !keyword.test(snippet)) continue
+        return { extras: { [name]: '0' }, source: 'scraped' }
+      }
+      for (const m of formHtml.matchAll(/<input\b([^>]*)\/?>/gi)) {
+        const attrs = m[1]
+        const type = (/type=["']([^"']*)["']/i.exec(attrs)?.[1] || '').toLowerCase()
+        if (type !== 'hidden') continue
+        const name = /name=["']([^"']+)["']/i.exec(attrs)?.[1]
+        if (!name || !keyword.test(name)) continue
+        return { extras: { [name]: '0' }, source: 'scraped' }
+      }
+      return { extras: {}, source: 'none' }
+    }
+
     /** Marcar como pago: o admin usa `POST .../services/virtualcatalog` (não `services/view`). */
     const postVirtualCatalogSetAsPaid = async (
       saleId: string,
       openAmt: string,
       totalAmt: string,
       pct: string,
+      notifyExtras: Record<string, string> = {},
     ) => {
       const jwt = await getJwt('setAsPaid')
       const params = new URLSearchParams({
@@ -124,6 +160,9 @@ serve(async (req) => {
         JWT: jwt,
         Path: 'setAsPaid',
       })
+      for (const [k, v] of Object.entries(notifyExtras)) {
+        if (k && v !== undefined && v !== null) params.set(k, String(v))
+      }
       const res = await fetch(`${BASE}/services/virtualcatalog`, {
         method: 'POST',
         headers: viewHeaders(),
@@ -264,6 +303,28 @@ serve(async (req) => {
       return new Response(JSON.stringify(scrapPaymentDetails(detailsHtml)), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
+    /** Telefone/nome do cadastro Zeglam por VirtualCatalogSaleID (form-payment). Usado no painel para cruzar comprovante ↔ pendência. */
+    if (action === 'enrich_phones') {
+      const ids = Array.isArray(salesIds) ? salesIds.map((s) => String(s)).filter(Boolean) : []
+      const out: Record<string, { phone_digits: string | null; customer_name: string | null }> = {}
+      for (const sid of ids) {
+        try {
+          const formHtml = await fetchView('virtualcatalog/form-payment', { VirtualCatalogSalesID: sid })
+          const details = scrapPaymentDetails(formHtml)
+          const rawPhone = details['Cliente/Telefone'] || details['Telefone'] || details['Cliente'] || ''
+          const digits = rawPhone.replace(/\D/g, '')
+          const customer_name =
+            (details['Cliente'] && details['Cliente'].trim()) ||
+            (details['Nome'] && details['Nome'].trim()) ||
+            null
+          out[sid] = { phone_digits: digits.length >= 8 ? digits : null, customer_name }
+        } catch {
+          out[sid] = { phone_digits: null, customer_name: null }
+        }
+      }
+      return new Response(JSON.stringify(out), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
     if (action === 'confirm_payment') {
       if (!salesId) throw new Error('salesId is required')
       const sid = String(salesId)
@@ -279,13 +340,28 @@ serve(async (req) => {
         )
       }
 
+      const wantNotify = notifyCustomer !== false
+      let notifyExtras: Record<string, string> = {}
+      let notifySource: 'env' | 'scraped' | 'none' = 'none'
+      const envParam = Deno.env.get('ZEGLAM_NOTIFY_CLIENT_PARAM')?.trim()
+      if (envParam) {
+        const onVal = Deno.env.get('ZEGLAM_NOTIFY_CLIENT_ON') ?? '1'
+        const offVal = Deno.env.get('ZEGLAM_NOTIFY_CLIENT_OFF') ?? '0'
+        notifyExtras = { [envParam]: wantNotify ? onVal : offVal }
+        notifySource = 'env'
+      } else if (!wantNotify) {
+        const built = scrapeClientNotifySuppressionExtras(formHtml)
+        notifyExtras = built.extras
+        notifySource = built.source
+      }
+
       const isStillPending = async (): Promise<boolean> => {
         const pendingHtml = await fetchView('virtualcatalog/all-pending-customers')
         const rows = scrapPending(pendingHtml)
         return rows.some((r) => String(r.salesId) === sid)
       }
 
-      const r = await postVirtualCatalogSetAsPaid(sid, openStr, totalStr, pctStr)
+      const r = await postVirtualCatalogSetAsPaid(sid, openStr, totalStr, pctStr, notifyExtras)
       const attemptLog = [
         {
           path: 'services/virtualcatalog',
@@ -293,6 +369,9 @@ serve(async (req) => {
           variant: 'setAsPaid+VirtualCatalogSaleID',
           status: r.status,
           ok: r.ok,
+          notifyCustomer: wantNotify,
+          notifySource,
+          notifyExtraKeys: Object.keys(notifyExtras),
         },
       ]
       const last = { ok: r.ok, status: r.status, text: r.text, path: 'virtualcatalog→setAsPaid' }
@@ -311,6 +390,8 @@ serve(async (req) => {
 
       const stillInPendingList = r.ok && !looksLikeViewError(r.text) && stillPending === true
 
+      const clientNotifySuppressionUnconfigured = !wantNotify && notifySource === 'none'
+
       return new Response(
         JSON.stringify({
           success,
@@ -318,6 +399,9 @@ serve(async (req) => {
           pathUsed: last.path,
           preview: (last.text ?? '').slice(0, 800),
           attemptLog,
+          notifyCustomer: wantNotify,
+          clientNotifyConfigured: notifySource !== 'none' || wantNotify,
+          ...(clientNotifySuppressionUnconfigured ? { clientNotifySuppressionUnconfigured: true } : {}),
           ...(stillInPendingList ? { stillInPendingList: true } : {}),
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },

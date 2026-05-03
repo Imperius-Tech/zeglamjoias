@@ -4,6 +4,7 @@ import { Search, CheckCircle, XCircle, Clock, CreditCard, ExternalLink, MessageS
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useDashboardStore } from '@/lib/store';
+import { confirmProofPaymentInZeglam } from '@/lib/zeglamComprovanteConfirm';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -74,17 +75,30 @@ function formatEvolutionSendFailure(data: unknown, invokeError: { message?: stri
 export default function ComprovantesPage() {
   const navigate = useNavigate();
   const selectConversation = useDashboardStore((s) => s.selectConversation);
+  const activeInstanceName = useDashboardStore((s) => s.activeInstanceName);
   const [proofs, setProofs] = useState<PaymentProof[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
-  /** Erro ao enviar confirmação pelo WhatsApp após marcar comprovante (DB já atualizado). */
+  /** Quando marcado (default), confirmação no Zeglam com fluxo normal (notificar cliente). Desmarcado: tenta suprimir. */
+  const [notifyZeglamOnProofConfirm, setNotifyZeglamOnProofConfirm] = useState(true);
+  /** Erro ao registrar pagamento no Zeglam ou ao atualizar o comprovante. */
   const [whatsappNotifyError, setWhatsappNotifyError] = useState<string | null>(null);
+  const [testPhone, setTestPhone] = useState('34987005542');
+  const [testSendBusy, setTestSendBusy] = useState(false);
+  const [testSendMessage, setTestSendMessage] = useState<string | null>(null);
+  /** Aviso após confirmar com sucesso (fluxo Zeglam + DB). */
+  const [whatsappNotifyOk, setWhatsappNotifyOk] = useState<string | null>(null);
+  /** Aviso: supressão de notificação não configurada no scrape (pagamento ainda pode avisar o cliente). */
+  const [whatsappNotifyWarn, setWhatsappNotifyWarn] = useState<string | null>(null);
 
   useEffect(() => {
     setWhatsappNotifyError(null);
+    setWhatsappNotifyOk(null);
+    setWhatsappNotifyWarn(null);
+    setNotifyZeglamOnProofConfirm(true);
   }, [selectedId]);
 
   useEffect(() => {
@@ -117,7 +131,44 @@ export default function ComprovantesPage() {
   async function updateStatus(id: string, status: 'pendente' | 'confirmado' | 'rejeitado', notes?: string) {
     setUpdating(true);
     setWhatsappNotifyError(null);
+    setWhatsappNotifyOk(null);
+    setWhatsappNotifyWarn(null);
     const proof = proofs.find((p) => p.id === id);
+
+    if (status === 'confirmado' && proof) {
+      const valueRaw =
+        proof.detected_value?.trim() ||
+        proof.media_analysis?.payment_data?.value?.trim() ||
+        proof.media_analysis?.payment_value?.trim() ||
+        '';
+      if (!valueRaw) {
+        setWhatsappNotifyError(
+          'Não há valor detectado no comprovante. Informe o valor na análise ou confirme o pagamento manualmente no Zeglam.',
+        );
+        setUpdating(false);
+        return;
+      }
+      const zeglam = await confirmProofPaymentInZeglam(
+        supabase,
+        {
+          conversation_id: proof.conversation_id,
+          customer_name: proof.customer_name,
+          detected_value: valueRaw,
+        },
+        { notifyCustomer: notifyZeglamOnProofConfirm },
+      );
+      if (!zeglam.ok) {
+        setWhatsappNotifyError(zeglam.error);
+        setUpdating(false);
+        return;
+      }
+      if (zeglam.clientNotifySuppressionUnconfigured) {
+        setWhatsappNotifyWarn(
+          'Pagamento registrado. Não foi possível garantir que o aviso automático ao cliente fique desligado — ele pode ainda ser enviado.',
+        );
+      }
+    }
+
     const { error } = await supabase.from('payment_proofs').update({
       status,
       notes: notes || null,
@@ -130,26 +181,94 @@ export default function ComprovantesPage() {
       return;
     }
 
-    if (status === 'confirmado' && proof?.conversation_id) {
-      const text = buildProofConfirmedWhatsAppText(proof);
-      const { data: sendData, error: sendErr } = await supabase.functions.invoke('evolution-send', {
-        body: { conversationId: proof.conversation_id, text },
-      });
-      const payloadErr =
-        sendData && typeof sendData === 'object' && 'error' in sendData && (sendData as { error?: string }).error;
-      if (sendErr || payloadErr) {
-        const msg = formatEvolutionSendFailure(sendData, sendErr);
-        setWhatsappNotifyError(
-          `Comprovante salvo como confirmado, mas a mensagem no WhatsApp não foi enviada: ${msg}. Verifique a instância Evolution (sessão conectada).`,
-        );
-        console.error('evolution-send after proof confirm:', sendErr, sendData);
-      }
-    } else if (status === 'confirmado' && proof && !proof.conversation_id) {
-      setWhatsappNotifyError('Comprovante confirmado no sistema, mas não há conversa vinculada para enviar WhatsApp.');
+    if (status === 'confirmado') {
+      setWhatsappNotifyOk('Pagamento confirmado.');
     }
 
     await loadProofs();
     setUpdating(false);
+  }
+
+  /** Mensagem fictícia de confirmação — localiza conversa pelo telefone (dígitos) e chama evolution-send. */
+  async function sendFakeProofConfirmationTest() {
+    const digits = testPhone.replace(/\D/g, '');
+    if (digits.length < 8) {
+      setTestSendMessage('Digite um telefone válido (DDD + número).');
+      return;
+    }
+    setTestSendBusy(true);
+    setTestSendMessage(null);
+    setWhatsappNotifyError(null);
+    try {
+      const variants = new Set<string>([digits]);
+      if (digits.length === 11 && !digits.startsWith('55')) {
+        variants.add(`55${digits}`);
+      }
+      if (digits.length >= 9) {
+        variants.add(digits.slice(-9));
+        variants.add(digits.slice(-8));
+      }
+      const orParts = [...variants].flatMap((v) => [
+        `whatsapp_jid.ilike.%${v}%`,
+        `customer_phone.ilike.%${v}%`,
+      ]);
+      let { data: rows, error: qErr } = await supabase
+        .from('conversations')
+        .select('id, customer_name, whatsapp_jid, customer_phone')
+        .or(orParts.join(','))
+        .limit(12);
+
+      if ((!rows || rows.length === 0) && /ronan/i.test(testPhone.trim())) {
+        const byName = await supabase
+          .from('conversations')
+          .select('id, customer_name, whatsapp_jid, customer_phone')
+          .ilike('customer_name', '%ronan%')
+          .limit(6);
+        rows = byName.data;
+        qErr = byName.error;
+      }
+
+      if (qErr || !rows?.length) {
+        setTestSendMessage(
+          'Nenhuma conversa encontrada com esse número. Tente com DDI 55 (ex: 5534987005542), confira o contato na lista de conversas ou use parte do nome.',
+        );
+        return;
+      }
+      const conv =
+        rows.find((r) => (r.customer_name || '').toLowerCase().includes('ronan')) || rows[0];
+      const fakeProof: PaymentProof = {
+        id: 'test',
+        conversation_id: conv.id,
+        message_id: '',
+        customer_name: conv.customer_name || '',
+        customer_phone: conv.customer_phone || '',
+        media_url: '',
+        detected_value: 'R$ 0,01 (teste)',
+        status: 'confirmado',
+        notes: null,
+        confirmed_at: null,
+        created_at: new Date().toISOString(),
+      };
+      const text = `[TESTE painel] ${buildProofConfirmedWhatsAppText(fakeProof)}`;
+      const { data: sendData, error: sendErr } = await supabase.functions.invoke('evolution-send', {
+        body: {
+          conversationId: conv.id,
+          text,
+          ...(activeInstanceName ? { instanceName: activeInstanceName } : {}),
+        },
+      });
+      const payloadErr =
+        sendData && typeof sendData === 'object' && 'error' in sendData && (sendData as { error?: string }).error;
+      if (sendErr || payloadErr) {
+        setTestSendMessage(formatEvolutionSendFailure(sendData, sendErr));
+        return;
+      }
+      setTestSendMessage(
+        `Enviado para ${conv.customer_name} (${conv.customer_phone}). Verifique o WhatsApp.`,
+      );
+    } finally {
+      setTestSendBusy(false);
+    }
   }
 
   const filtered = useMemo(() => {
@@ -225,6 +344,44 @@ export default function ComprovantesPage() {
                 {f.label}
               </button>
             ))}
+          </div>
+
+          <div style={{ paddingTop: 4, borderTop: '1px solid var(--border)', marginTop: 4 }}>
+            <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+              Teste — envio direto pelo Evolution
+            </p>
+            <p style={{ fontSize: 11, color: 'var(--fg-faint)', lineHeight: 1.4, marginBottom: 8 }}>
+              Não usa o Zeglam. Apenas localiza a conversa pelo número e envia um texto de teste pela instância ativa (não altera comprovante nem pedido).
+            </p>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                type="text"
+                value={testPhone}
+                onChange={(e) => setTestPhone(e.target.value)}
+                placeholder="Ex: 34987005542"
+                style={{
+                  flex: 1, height: 34, padding: '0 10px', borderRadius: 8,
+                  background: 'var(--glass)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg-dim)', outline: 'none',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => void sendFakeProofConfirmationTest()}
+                disabled={testSendBusy}
+                style={{
+                  flexShrink: 0, padding: '8px 12px', borderRadius: 8, border: 'none', cursor: testSendBusy ? 'wait' : 'pointer',
+                  fontSize: 11, fontWeight: 600, color: '#fff', background: testSendBusy ? 'var(--surface-3)' : 'var(--accent, #6366f1)',
+                }}
+              >
+                {testSendBusy ? 'Enviando…' : 'Enviar teste'}
+              </button>
+            </div>
+            {activeInstanceName && (
+              <p style={{ fontSize: 10, color: 'var(--fg-faint)', marginTop: 6 }}>Instância Evolution: {activeInstanceName}</p>
+            )}
+            {testSendMessage && (
+              <p style={{ fontSize: 11, marginTop: 8, lineHeight: 1.45, color: 'var(--fg-muted)' }}>{testSendMessage}</p>
+            )}
           </div>
         </div>
 
@@ -433,9 +590,66 @@ export default function ComprovantesPage() {
                 </div>
               )}
 
+              {whatsappNotifyWarn && (
+                <div
+                  role="status"
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    fontSize: 12,
+                    lineHeight: 1.45,
+                    color: '#fcd34d',
+                    background: 'rgba(251,191,36,0.12)',
+                    border: '1px solid rgba(251,191,36,0.35)',
+                  }}
+                >
+                  {whatsappNotifyWarn}
+                </div>
+              )}
+
+              {whatsappNotifyOk && (
+                <div
+                  role="status"
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    fontSize: 12,
+                    lineHeight: 1.45,
+                    color: '#86efac',
+                    background: 'rgba(16,185,129,0.12)',
+                    border: '1px solid rgba(16,185,129,0.35)',
+                  }}
+                >
+                  {whatsappNotifyOk}
+                </div>
+              )}
+
               {/* Actions */}
               <div style={{ marginTop: 'auto' }}>
                 {selected.status === 'pendente' && (
+                  <>
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 10,
+                        cursor: updating ? 'not-allowed' : 'pointer',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: 'var(--fg-muted)',
+                        lineHeight: 1.45,
+                        marginBottom: 10,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={notifyZeglamOnProofConfirm}
+                        onChange={(e) => setNotifyZeglamOnProofConfirm(e.target.checked)}
+                        disabled={updating}
+                        style={{ marginTop: 2, width: 16, height: 16, accentColor: 'var(--emerald)', flexShrink: 0 }}
+                      />
+                      <span>Notificar cliente automaticamente ao confirmar.</span>
+                    </label>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={() => updateStatus(selected.id, 'confirmado')} disabled={updating}
                       style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 16px', borderRadius: 10, background: 'var(--emerald)', color: '#fff', fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer' }}>
@@ -446,6 +660,7 @@ export default function ComprovantesPage() {
                       <XCircle size={14} /> Rejeitar
                     </button>
                   </div>
+                  </>
                 )}
                 {selected.status !== 'pendente' && (
                   <button onClick={() => updateStatus(selected.id, 'pendente')} disabled={updating}

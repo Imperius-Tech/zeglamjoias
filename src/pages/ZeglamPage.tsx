@@ -137,6 +137,8 @@ export default function ZeglamPage() {
   const [error, setError] = useState<string | null>(null);
   const [pendingFilter, setPendingFilter] = useState<'todos' | 'com_comprovante' | 'sem_comprovante'>('todos');
   const [atrasoOrder, setAtrasoOrder] = useState<'recentes' | 'antigos'>('recentes');
+  const [pendingPage, setPendingPage] = useState(1);
+  const PENDING_PAGE_SIZE = 50;
   /** Menu suspenso de ordenação (“gaveta” / dropdown). */
   const [ordenMenuOpen, setOrdenMenuOpen] = useState(false);
   const ordenMenuWrapRef = useRef<HTMLDivElement>(null);
@@ -560,6 +562,15 @@ export default function ZeglamPage() {
     return withSortKey.map((x) => x.row);
   }, [pendingCustomers, searchText, pendingFilter, atrasoOrder]);
 
+  const totalPendingPages = Math.max(1, Math.ceil(filteredPending.length / PENDING_PAGE_SIZE));
+  const currentPage = Math.min(pendingPage, totalPendingPages);
+  const pagedPending = useMemo(
+    () => filteredPending.slice((currentPage - 1) * PENDING_PAGE_SIZE, currentPage * PENDING_PAGE_SIZE),
+    [filteredPending, currentPage],
+  );
+
+  useEffect(() => { setPendingPage(1); }, [searchText, pendingFilter, atrasoOrder]);
+
   if (loading) return <div style={{ padding: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><Loader size={24} className="spin" style={{ color: 'var(--accent)' }} /></div>;
 
   return (
@@ -884,7 +895,7 @@ export default function ZeglamPage() {
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                   <thead><tr style={{ background: 'var(--surface-2)' }}><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase' }}>Cliente</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase' }}>Cruzamento</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase' }}>Atraso</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', textAlign: 'right' }}>Valor</th><th style={{ padding: '10px 20px', fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', textAlign: 'center' }}>Ações</th></tr></thead>
-                  <tbody>{filteredPending.map((item, i) => (<tr key={i} style={{ borderBottom: i < filteredPending.length - 1 ? '1px solid var(--border)' : 'none' }}><td data-label="Cliente" style={{ padding: '12px 20px' }}>
+                  <tbody>{pagedPending.map((item, i) => (<tr key={i} style={{ borderBottom: i < pagedPending.length - 1 ? '1px solid var(--border)' : 'none' }}><td data-label="Cliente" style={{ padding: '12px 20px' }}>
                     <div
                       onClick={() => item.salesId && handleCustomerClick(item.salesId, item.conversationId)}
                       style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: item.salesId ? 'pointer' : 'default' }}
@@ -958,6 +969,50 @@ export default function ZeglamPage() {
                   </td></tr>))}</tbody>
                 </table>
               </div>
+              {filteredPending.length > PENDING_PAGE_SIZE && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '12px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)',
+                  fontSize: 11, color: 'var(--fg-muted)', flexWrap: 'wrap', gap: 10,
+                }}>
+                  <span>
+                    Mostrando <strong style={{ color: 'var(--strong-text)' }}>{(currentPage - 1) * PENDING_PAGE_SIZE + 1}</strong>
+                    {' – '}
+                    <strong style={{ color: 'var(--strong-text)' }}>{Math.min(currentPage * PENDING_PAGE_SIZE, filteredPending.length)}</strong>
+                    {' de '}
+                    <strong style={{ color: 'var(--strong-text)' }}>{filteredPending.length}</strong>
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => setPendingPage(1)}
+                      disabled={currentPage === 1}
+                      style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--glass)', color: currentPage === 1 ? 'var(--fg-faint)' : 'var(--fg-dim)', fontSize: 11, fontWeight: 700, cursor: currentPage === 1 ? 'not-allowed' : 'pointer' }}
+                    >«</button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingPage((p) => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--glass)', color: currentPage === 1 ? 'var(--fg-faint)' : 'var(--fg-dim)', fontSize: 11, fontWeight: 700, cursor: currentPage === 1 ? 'not-allowed' : 'pointer' }}
+                    >‹ Anterior</button>
+                    <span style={{ padding: '0 8px', fontSize: 11, fontWeight: 700, color: 'var(--strong-text)' }}>
+                      {currentPage} / {totalPendingPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPendingPage((p) => Math.min(totalPendingPages, p + 1))}
+                      disabled={currentPage === totalPendingPages}
+                      style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--glass)', color: currentPage === totalPendingPages ? 'var(--fg-faint)' : 'var(--fg-dim)', fontSize: 11, fontWeight: 700, cursor: currentPage === totalPendingPages ? 'not-allowed' : 'pointer' }}
+                    >Próxima ›</button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingPage(totalPendingPages)}
+                      disabled={currentPage === totalPendingPages}
+                      style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--glass)', color: currentPage === totalPendingPages ? 'var(--fg-faint)' : 'var(--fg-dim)', fontSize: 11, fontWeight: 700, cursor: currentPage === totalPendingPages ? 'not-allowed' : 'pointer' }}
+                    >»</button>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}

@@ -51,31 +51,9 @@ const statusConfig = {
 
 type FilterStatus = 'all' | 'pendente' | 'confirmado' | 'rejeitado';
 
-function buildProofConfirmedWhatsAppText(proof: PaymentProof): string {
-  const v = proof.detected_value?.trim();
-  if (v) {
-    return `Olá! Confirmamos o recebimento do seu comprovante de pagamento (${v}). Obrigado!`;
-  }
-  return 'Olá! Confirmamos o recebimento do seu comprovante de pagamento. Obrigado!';
-}
-
-function formatEvolutionSendFailure(data: unknown, invokeError: { message?: string } | null): string {
-  if (invokeError?.message) {
-    return `Falha ao chamar o envio: ${invokeError.message}`;
-  }
-  if (!data || typeof data !== 'object') return 'Resposta inválida do servidor de envio.';
-  const d = data as { error?: string; details?: { response?: { message?: unknown }; message?: unknown } };
-  if (!d.error) return 'Envio não concluído (sem detalhe).';
-  const inner = d.details?.response?.message ?? d.details?.message;
-  const innerStr = Array.isArray(inner) ? inner.join(' ') : inner != null ? String(inner) : '';
-  if (innerStr) return `${d.error}: ${innerStr}`;
-  return d.error;
-}
-
 export default function ComprovantesPage() {
   const navigate = useNavigate();
   const selectConversation = useDashboardStore((s) => s.selectConversation);
-  const activeInstanceName = useDashboardStore((s) => s.activeInstanceName);
   const [proofs, setProofs] = useState<PaymentProof[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -86,13 +64,17 @@ export default function ComprovantesPage() {
   const [notifyZeglamOnProofConfirm, setNotifyZeglamOnProofConfirm] = useState(true);
   /** Erro ao registrar pagamento no Zeglam ou ao atualizar o comprovante. */
   const [whatsappNotifyError, setWhatsappNotifyError] = useState<string | null>(null);
-  const [testPhone, setTestPhone] = useState('34987005542');
-  const [testSendBusy, setTestSendBusy] = useState(false);
-  const [testSendMessage, setTestSendMessage] = useState<string | null>(null);
   /** Aviso após confirmar com sucesso (fluxo Zeglam + DB). */
   const [whatsappNotifyOk, setWhatsappNotifyOk] = useState<string | null>(null);
   /** Aviso: supressão de notificação não configurada no scrape (pagamento ainda pode avisar o cliente). */
   const [whatsappNotifyWarn, setWhatsappNotifyWarn] = useState<string | null>(null);
+  /** Modal "Vincular pagador" — id do comprovante quando aberto. */
+  const [linkingProofId, setLinkingProofId] = useState<string | null>(null);
+  const [linkingPayerName, setLinkingPayerName] = useState<string | null>(null);
+  const [linkPendingList, setLinkPendingList] = useState<Array<{ salesId: string; valor: string; cliente: string }>>([]);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkSearch, setLinkSearch] = useState('');
+  const [linkSelectedSalesId, setLinkSelectedSalesId] = useState<string | null>(null);
 
   useEffect(() => {
     setWhatsappNotifyError(null);
@@ -128,6 +110,98 @@ export default function ComprovantesPage() {
     setLoading(false);
   }
 
+  /** Abre modal de vincular pagador e carrega lista de pendências do Zeglam. */
+  async function openLinkModal(proofId: string, payerName: string | null) {
+    setLinkingProofId(proofId);
+    setLinkingPayerName(payerName);
+    setLinkSelectedSalesId(null);
+    setLinkSearch('');
+    setLinkPendingList([]);
+    setLinkBusy(true);
+    try {
+      const { data } = await supabase.functions.invoke('zeglam-api', { body: { action: 'get_all' } });
+      const list = ((data as any)?.pending || []) as Array<{ salesId: string; valor: string; cliente: string }>;
+      setLinkPendingList(list.filter((p) => p.salesId));
+    } catch (e) {
+      console.error('openLinkModal:', e);
+    } finally {
+      setLinkBusy(false);
+    }
+  }
+
+  /** Salva alias e tenta confirmar pagamento usando o sales_id escolhido. */
+  async function confirmLinkAndPay() {
+    if (!linkingProofId || !linkSelectedSalesId) return;
+    setLinkBusy(true);
+    setWhatsappNotifyError(null);
+    setWhatsappNotifyOk(null);
+    try {
+      const proof = proofs.find((p) => p.id === linkingProofId);
+      if (!proof) { setLinkBusy(false); return; }
+      const payerName = linkingPayerName || proof.media_analysis?.payment_data?.payer_name || proof.media_analysis?.payer_name || proof.customer_name;
+      const phoneDigits = (proof.customer_phone || '').replace(/\D/g, '').slice(-9);
+
+      // Salva alias (idempotente: se já existir mesma linha, faz update)
+      const { data: existing } = await supabase
+        .from('payer_aliases')
+        .select('id, use_count')
+        .eq('sales_id', linkSelectedSalesId)
+        .eq('payer_name', payerName)
+        .maybeSingle();
+      if (existing) {
+        await supabase.from('payer_aliases').update({
+          last_used_at: new Date().toISOString(),
+          use_count: ((existing.use_count as number) || 0) + 1,
+          customer_phone_digits: phoneDigits || null,
+          customer_name: proof.customer_name,
+        }).eq('id', existing.id);
+      } else {
+        await supabase.from('payer_aliases').insert({
+          payer_name: payerName,
+          customer_name: proof.customer_name,
+          customer_phone_digits: phoneDigits || null,
+          sales_id: linkSelectedSalesId,
+          notes: 'Criado via dashboard de comprovantes',
+          last_used_at: new Date().toISOString(),
+          use_count: 1,
+        });
+      }
+
+      // Re-tenta confirmar — agora alias permite o match
+      const valueRaw =
+        proof.detected_value?.trim() ||
+        proof.media_analysis?.payment_data?.value?.trim() ||
+        proof.media_analysis?.payment_value?.trim() ||
+        '';
+      const zeglam = await confirmProofPaymentInZeglam(
+        supabase,
+        {
+          conversation_id: proof.conversation_id,
+          customer_name: proof.customer_name,
+          detected_value: valueRaw,
+          payer_name: payerName,
+        },
+        { notifyCustomer: notifyZeglamOnProofConfirm },
+      );
+      if (!zeglam.ok) {
+        setWhatsappNotifyError(zeglam.error);
+        setLinkBusy(false);
+        return;
+      }
+      await supabase.from('payment_proofs').update({
+        status: 'confirmado',
+        confirmed_at: new Date().toISOString(),
+      }).eq('id', linkingProofId);
+      setWhatsappNotifyOk('Pagamento confirmado e pagador vinculado.');
+      setLinkingProofId(null);
+      await loadProofs();
+    } catch (e: any) {
+      setWhatsappNotifyError(e?.message || String(e));
+    } finally {
+      setLinkBusy(false);
+    }
+  }
+
   async function updateStatus(id: string, status: 'pendente' | 'confirmado' | 'rejeitado', notes?: string) {
     setUpdating(true);
     setWhatsappNotifyError(null);
@@ -148,16 +222,25 @@ export default function ComprovantesPage() {
         setUpdating(false);
         return;
       }
+      const payerName =
+        proof.media_analysis?.payment_data?.payer_name?.trim() ||
+        proof.media_analysis?.payer_name?.trim() ||
+        null;
       const zeglam = await confirmProofPaymentInZeglam(
         supabase,
         {
           conversation_id: proof.conversation_id,
           customer_name: proof.customer_name,
           detected_value: valueRaw,
+          payer_name: payerName,
         },
         { notifyCustomer: notifyZeglamOnProofConfirm },
       );
       if (!zeglam.ok) {
+        if (zeglam.needsManualZeglam) {
+          setLinkingProofId(id);
+          setLinkingPayerName(payerName);
+        }
         setWhatsappNotifyError(zeglam.error);
         setUpdating(false);
         return;
@@ -187,88 +270,6 @@ export default function ComprovantesPage() {
 
     await loadProofs();
     setUpdating(false);
-  }
-
-  /** Mensagem fictícia de confirmação — localiza conversa pelo telefone (dígitos) e chama evolution-send. */
-  async function sendFakeProofConfirmationTest() {
-    const digits = testPhone.replace(/\D/g, '');
-    if (digits.length < 8) {
-      setTestSendMessage('Digite um telefone válido (DDD + número).');
-      return;
-    }
-    setTestSendBusy(true);
-    setTestSendMessage(null);
-    setWhatsappNotifyError(null);
-    try {
-      const variants = new Set<string>([digits]);
-      if (digits.length === 11 && !digits.startsWith('55')) {
-        variants.add(`55${digits}`);
-      }
-      if (digits.length >= 9) {
-        variants.add(digits.slice(-9));
-        variants.add(digits.slice(-8));
-      }
-      const orParts = [...variants].flatMap((v) => [
-        `whatsapp_jid.ilike.%${v}%`,
-        `customer_phone.ilike.%${v}%`,
-      ]);
-      let { data: rows, error: qErr } = await supabase
-        .from('conversations')
-        .select('id, customer_name, whatsapp_jid, customer_phone')
-        .or(orParts.join(','))
-        .limit(12);
-
-      if ((!rows || rows.length === 0) && /ronan/i.test(testPhone.trim())) {
-        const byName = await supabase
-          .from('conversations')
-          .select('id, customer_name, whatsapp_jid, customer_phone')
-          .ilike('customer_name', '%ronan%')
-          .limit(6);
-        rows = byName.data;
-        qErr = byName.error;
-      }
-
-      if (qErr || !rows?.length) {
-        setTestSendMessage(
-          'Nenhuma conversa encontrada com esse número. Tente com DDI 55 (ex: 5534987005542), confira o contato na lista de conversas ou use parte do nome.',
-        );
-        return;
-      }
-      const conv =
-        rows.find((r) => (r.customer_name || '').toLowerCase().includes('ronan')) || rows[0];
-      const fakeProof: PaymentProof = {
-        id: 'test',
-        conversation_id: conv.id,
-        message_id: '',
-        customer_name: conv.customer_name || '',
-        customer_phone: conv.customer_phone || '',
-        media_url: '',
-        detected_value: 'R$ 0,01 (teste)',
-        status: 'confirmado',
-        notes: null,
-        confirmed_at: null,
-        created_at: new Date().toISOString(),
-      };
-      const text = `[TESTE painel] ${buildProofConfirmedWhatsAppText(fakeProof)}`;
-      const { data: sendData, error: sendErr } = await supabase.functions.invoke('evolution-send', {
-        body: {
-          conversationId: conv.id,
-          text,
-          ...(activeInstanceName ? { instanceName: activeInstanceName } : {}),
-        },
-      });
-      const payloadErr =
-        sendData && typeof sendData === 'object' && 'error' in sendData && (sendData as { error?: string }).error;
-      if (sendErr || payloadErr) {
-        setTestSendMessage(formatEvolutionSendFailure(sendData, sendErr));
-        return;
-      }
-      setTestSendMessage(
-        `Enviado para ${conv.customer_name} (${conv.customer_phone}). Verifique o WhatsApp.`,
-      );
-    } finally {
-      setTestSendBusy(false);
-    }
   }
 
   const filtered = useMemo(() => {
@@ -346,43 +347,6 @@ export default function ComprovantesPage() {
             ))}
           </div>
 
-          <div style={{ paddingTop: 4, borderTop: '1px solid var(--border)', marginTop: 4 }}>
-            <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
-              Teste — envio direto pelo Evolution
-            </p>
-            <p style={{ fontSize: 11, color: 'var(--fg-faint)', lineHeight: 1.4, marginBottom: 8 }}>
-              Não usa o Zeglam. Apenas localiza a conversa pelo número e envia um texto de teste pela instância ativa (não altera comprovante nem pedido).
-            </p>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input
-                type="text"
-                value={testPhone}
-                onChange={(e) => setTestPhone(e.target.value)}
-                placeholder="Ex: 34987005542"
-                style={{
-                  flex: 1, height: 34, padding: '0 10px', borderRadius: 8,
-                  background: 'var(--glass)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--fg-dim)', outline: 'none',
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => void sendFakeProofConfirmationTest()}
-                disabled={testSendBusy}
-                style={{
-                  flexShrink: 0, padding: '8px 12px', borderRadius: 8, border: 'none', cursor: testSendBusy ? 'wait' : 'pointer',
-                  fontSize: 11, fontWeight: 600, color: '#fff', background: testSendBusy ? 'var(--surface-3)' : 'var(--accent, #6366f1)',
-                }}
-              >
-                {testSendBusy ? 'Enviando…' : 'Enviar teste'}
-              </button>
-            </div>
-            {activeInstanceName && (
-              <p style={{ fontSize: 10, color: 'var(--fg-faint)', marginTop: 6 }}>Instância Evolution: {activeInstanceName}</p>
-            )}
-            {testSendMessage && (
-              <p style={{ fontSize: 11, marginTop: 8, lineHeight: 1.45, color: 'var(--fg-muted)' }}>{testSendMessage}</p>
-            )}
-          </div>
         </div>
 
         {/* List */}
@@ -584,9 +548,38 @@ export default function ComprovantesPage() {
                     color: '#fecaca',
                     background: 'rgba(239,68,68,0.12)',
                     border: '1px solid rgba(239,68,68,0.35)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
                   }}
                 >
-                  {whatsappNotifyError}
+                  <span>{whatsappNotifyError}</span>
+                  {selectedId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const p = proofs.find((x) => x.id === selectedId);
+                        const payer =
+                          p?.media_analysis?.payment_data?.payer_name ||
+                          p?.media_analysis?.payer_name ||
+                          null;
+                        openLinkModal(selectedId, payer);
+                      }}
+                      style={{
+                        alignSelf: 'flex-start',
+                        padding: '6px 12px',
+                        borderRadius: 8,
+                        background: 'rgba(212,168,67,0.15)',
+                        border: '1px solid rgba(212,168,67,0.35)',
+                        color: 'var(--accent)',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Vincular pagador manualmente
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -686,6 +679,120 @@ export default function ComprovantesPage() {
           </div>
         )}
       </div>
+
+      {linkingProofId && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => { if (e.target === e.currentTarget && !linkBusy) setLinkingProofId(null); }}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+          }}
+        >
+          <div
+            style={{
+              width: 'min(620px, 100%)', maxHeight: '90vh', overflow: 'hidden',
+              borderRadius: 16, background: 'var(--surface)', border: '1px solid var(--border)',
+              display: 'flex', flexDirection: 'column',
+            }}
+          >
+            <div style={{ padding: 20, borderBottom: '1px solid var(--border)' }}>
+              <h2 style={{ fontSize: 18, fontWeight: 800, color: 'var(--strong-text)', marginBottom: 6 }}>
+                Vincular pagador
+              </h2>
+              <p style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                Pagador <strong style={{ color: 'var(--accent)' }}>{linkingPayerName || '(nome não detectado)'}</strong> não casa com cliente.
+                Escolha o pedido pendente correspondente. O sistema vai aprender essa relação para baixar automaticamente nas próximas vezes.
+              </p>
+            </div>
+
+            <div style={{ padding: 16, borderBottom: '1px solid var(--border)' }}>
+              <div style={{ position: 'relative' }}>
+                <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-subtle)' }} />
+                <input
+                  type="text"
+                  value={linkSearch}
+                  onChange={(e) => setLinkSearch(e.target.value)}
+                  placeholder="Buscar por cliente ou valor..."
+                  style={{
+                    width: '100%', height: 36, paddingLeft: 36, paddingRight: 12, borderRadius: 10,
+                    background: 'var(--glass)', border: '1px solid var(--border)', fontSize: 13, color: 'var(--fg-dim)', outline: 'none',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 16px' }}>
+              {linkBusy && linkPendingList.length === 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+                  <Loader size={20} style={{ color: 'var(--fg-subtle)', animation: 'spin 1s linear infinite' }} />
+                </div>
+              ) : linkPendingList.length === 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--fg-subtle)', textAlign: 'center', padding: 24 }}>Nenhuma pendência carregada.</p>
+              ) : (
+                linkPendingList
+                  .filter((p) => {
+                    if (!linkSearch.trim()) return true;
+                    const q = linkSearch.toLowerCase();
+                    return (p.cliente || '').toLowerCase().includes(q) || (p.valor || '').toLowerCase().includes(q);
+                  })
+                  .slice(0, 80)
+                  .map((p) => {
+                    const isSelected = linkSelectedSalesId === p.salesId;
+                    return (
+                      <div
+                        key={p.salesId}
+                        onClick={() => setLinkSelectedSalesId(p.salesId)}
+                        style={{
+                          padding: '10px 12px', borderRadius: 10, marginBottom: 4, cursor: 'pointer',
+                          background: isSelected ? 'rgba(212,168,67,0.15)' : 'transparent',
+                          border: isSelected ? '1px solid var(--accent-border, rgba(212,168,67,0.4))' : '1px solid transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div className="truncate" style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)' }}>{p.cliente}</div>
+                          <div style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>#{p.salesId}</div>
+                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)', flexShrink: 0 }}>{p.valor}</div>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+
+            <div style={{ padding: 16, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => { if (!linkBusy) setLinkingProofId(null); }}
+                disabled={linkBusy}
+                style={{
+                  padding: '8px 16px', borderRadius: 10, background: 'var(--glass)', color: 'var(--fg-dim)',
+                  border: '1px solid var(--border)', fontSize: 13, fontWeight: 600, cursor: linkBusy ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmLinkAndPay}
+                disabled={!linkSelectedSalesId || linkBusy}
+                style={{
+                  padding: '8px 16px', borderRadius: 10,
+                  background: !linkSelectedSalesId || linkBusy ? 'rgba(212,168,67,0.4)' : 'var(--accent)',
+                  color: '#1a1a1a', border: 'none', fontSize: 13, fontWeight: 700,
+                  cursor: !linkSelectedSalesId || linkBusy ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                {linkBusy ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <CheckCircle size={14} />}
+                Vincular e dar baixa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

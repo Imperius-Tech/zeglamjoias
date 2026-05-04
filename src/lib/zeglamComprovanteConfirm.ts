@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   amountMatches,
   nameFullyCompatibleWithProof,
+  normalize,
   parseBrlAmount,
   phoneTail,
 } from '@/lib/zeglamMatchUtils';
@@ -10,7 +11,66 @@ export type ProofForZeglamConfirm = {
   conversation_id: string;
   customer_name: string;
   detected_value: string | null;
+  /** Nome do pagador extraído do comprovante (ex: "JOAO DA SILVA"), opcional. */
+  payer_name?: string | null;
 };
+
+async function lookupAliasSalesId(
+  supabase: SupabaseClient,
+  payerName: string | null | undefined,
+  customerPhoneDigits: string | null,
+): Promise<string | null> {
+  const candidates = new Set<string>();
+  if (payerName) candidates.add(normalize(payerName));
+  if (customerPhoneDigits && customerPhoneDigits.length >= 8) candidates.add(`__phone__${customerPhoneDigits}`);
+  if (!candidates.size) return null;
+
+  const payerNormalizedList = Array.from(candidates).filter((c) => !c.startsWith('__phone__'));
+  const phoneTails = Array.from(candidates).filter((c) => c.startsWith('__phone__')).map((c) => c.replace('__phone__', ''));
+
+  const queries: Promise<{ data: any[] | null }>[] = [];
+  if (payerNormalizedList.length) {
+    queries.push(
+      supabase
+        .from('payer_aliases')
+        .select('sales_id, customer_phone_digits, last_used_at, use_count')
+        .in('payer_name_normalized', payerNormalizedList)
+        .not('sales_id', 'is', null)
+        .order('use_count', { ascending: false })
+        .limit(5) as any,
+    );
+  }
+  if (phoneTails.length) {
+    queries.push(
+      supabase
+        .from('payer_aliases')
+        .select('sales_id, customer_phone_digits, last_used_at, use_count')
+        .in('customer_phone_digits', phoneTails)
+        .not('sales_id', 'is', null)
+        .order('use_count', { ascending: false })
+        .limit(5) as any,
+    );
+  }
+
+  const results = await Promise.all(queries);
+  for (const r of results) {
+    const row = r.data?.[0];
+    if (row?.sales_id) return row.sales_id as string;
+  }
+  return null;
+}
+
+export async function recordPayerAliasUsage(supabase: SupabaseClient, aliasSalesId: string) {
+  const { data: row } = await supabase
+    .from('payer_aliases')
+    .select('use_count')
+    .eq('sales_id', aliasSalesId)
+    .maybeSingle();
+  await supabase
+    .from('payer_aliases')
+    .update({ last_used_at: new Date().toISOString(), use_count: ((row?.use_count as number) || 0) + 1 })
+    .eq('sales_id', aliasSalesId);
+}
 
 type PendingRow = {
   salesId?: string;
@@ -78,9 +138,32 @@ export async function findBestZeglamPendingForProof(
     });
   }
 
+  // Tier 3: alias manual de pagador (ex: marido paga pela esposa, financeiro PJ).
+  if (!candidates.length) {
+    const aliasSalesId = await lookupAliasSalesId(supabase, proof.payer_name || proof.customer_name, proofPhoneTail || null);
+    if (aliasSalesId) {
+      const aliasRow = pendingList.find((p) => p.salesId === aliasSalesId);
+      if (aliasRow && amountMatches(aliasRow.valor, proof.detected_value || '')) {
+        const proofAmount = parseBrlAmount(proof.detected_value || '') || 0;
+        const zeglamAmount = parseBrlAmount(aliasRow.valor) || 0;
+        candidates.push({
+          salesId: aliasRow.salesId!,
+          valor: aliasRow.valor,
+          cliente: aliasRow.cliente,
+          diff: Math.abs(proofAmount - zeglamAmount),
+          tier: 3,
+        });
+      }
+    }
+  }
+
   if (!candidates.length) return null;
   candidates.sort((a, b) => a.tier - b.tier || a.diff - b.diff);
   const best = candidates[0];
+  // Registra uso do alias se foi tier 3
+  if (best.tier === 3) {
+    recordPayerAliasUsage(supabase, best.salesId).catch(() => {});
+  }
   return { salesId: best.salesId, valor: best.valor, cliente: best.cliente };
 }
 

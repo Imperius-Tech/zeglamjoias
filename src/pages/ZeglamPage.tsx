@@ -56,9 +56,10 @@ interface PendingCustomer {
   valor: string;
   salesId?: string;
   hasProof?: boolean;
-  matchTier?: 'phone_amount' | 'name_amount' | null;
+  matchTier?: 'phone_amount' | 'name_amount' | 'phone_provavel' | null;
   conversationId?: string;
   proofMessageId?: string;
+  provavelDiff?: { diffAbs: number; diffPct: number; proofValue: string | null };
 }
 
 /**
@@ -135,12 +136,21 @@ export default function ZeglamPage() {
   /** Aviso após confirmar com “não notificar” sem campo detectável no HTML (configure secrets ou confira o form Zeglam). */
   const [zeglamNotifyInfoBanner, setZeglamNotifyInfoBanner] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pendingFilter, setPendingFilter] = useState<'todos' | 'com_comprovante' | 'sem_comprovante'>('todos');
+  const [pendingFilter, setPendingFilter] = useState<'todos' | 'tier1' | 'tier2' | 'tier3'>('todos');
   const [atrasoOrder, setAtrasoOrder] = useState<'recentes' | 'antigos'>('recentes');
   const [pendingPage, setPendingPage] = useState(1);
   const PENDING_PAGE_SIZE = 50;
   /** Metadata do último refresh do cache Zeglam (quando atualizado, qtde, ms). */
   const [cacheMeta, setCacheMeta] = useState<{ last_full_refresh_at: string | null; last_full_refresh_count: number | null } | null>(null);
+  /** Estatísticas do Relatório Financeiro (funil dos comprovantes vs pendentes). */
+  const [reportStats, setReportStats] = useState<{
+    total_proofs: number; ja_confirmados: number; rejeitados: number;
+    pendentes_total: number; pendentes_phone_valido: number; pendentes_jid_lid: number;
+    pendentes_sem_valor: number; pendentes_com_zeglam_phone_match: number;
+    pendentes_total_zeglam: number; pendentes_zeglam_com_phone: number;
+    media_falhou: number; media_sem_analise: number;
+  } | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
   /** Menu suspenso de ordenação (“gaveta” / dropdown). */
   const [ordenMenuOpen, setOrdenMenuOpen] = useState(false);
   const ordenMenuWrapRef = useRef<HTMLDivElement>(null);
@@ -252,7 +262,7 @@ export default function ZeglamPage() {
         };
       });
 
-      /** Telefone WhatsApp compatível + valor dentro da tolerância (best-match por menor diff). */
+      /** Telefone WhatsApp compatível + valor dentro da tolerância 1% (best-match por menor diff). */
       const tryPhoneAndAmountMatch = (
         consumed: Set<string>,
         customer: any,
@@ -276,6 +286,38 @@ export default function ZeglamPage() {
           if (proofAmount == null) continue;
           const diff = Math.abs(proofAmount - zeglamAmount);
           if (diff < bestDiff) { bestDiff = diff; best = entry; }
+        }
+        return best;
+      };
+
+      /** Tier 1.5: phone bate + valor com diff entre 1% e 10% (NÃO baixa auto, só sinaliza pra revisão humana). */
+      const tryPhoneProvavel = (
+        consumed: Set<string>,
+        customer: any,
+        enrich: { phone_digits?: string | null; customer_name?: string | null } | null,
+      ): { entry: ProofIndexEntry; diffAbs: number; diffPct: number } | null => {
+        const zeglamPhoneTail = phoneTail(enrich?.phone_digits || '');
+        if (zeglamPhoneTail.length < 8) return null;
+        const zeglamAmount = parseBrlAmount(customer.valor);
+        if (zeglamAmount == null || zeglamAmount <= 0) return null;
+        const candidates = proofIndex.filter(
+          (entry) =>
+            !consumed.has(entry.proofKey) &&
+            entry.phoneTail.length >= 8 &&
+            (entry.phoneTail.endsWith(zeglamPhoneTail) || zeglamPhoneTail.endsWith(entry.phoneTail)),
+        );
+        let best: { entry: ProofIndexEntry; diffAbs: number; diffPct: number } | null = null;
+        for (const entry of candidates) {
+          const proofAmount = parseBrlAmount(entry.detectedValue || '');
+          if (proofAmount == null) continue;
+          const diffSigned = proofAmount - zeglamAmount;
+          const diffAbs = Math.abs(diffSigned);
+          const ratio = diffAbs / zeglamAmount;
+          if (ratio > 0.01 && ratio <= 0.10) {
+            // diffPct preserva sinal: positivo = pagou a mais; negativo = pagou a menos
+            const diffPct = diffSigned / zeglamAmount;
+            if (!best || diffAbs < best.diffAbs) best = { entry, diffAbs, diffPct };
+          }
         }
         return best;
       };
@@ -308,8 +350,9 @@ export default function ZeglamPage() {
 
       type RowResult = {
         matched: ProofIndexEntry | null;
-        matchTier: null | 'phone_amount' | 'name_amount';
+        matchTier: null | 'phone_amount' | 'name_amount' | 'phone_provavel';
         enrich: { phone_digits?: string | null; customer_name?: string | null } | null;
+        provavelDiff?: { diffAbs: number; diffPct: number; proofValue: string | null };
       };
 
       const rowResults = pendingList.map((customer: any): RowResult => {
@@ -317,10 +360,25 @@ export default function ZeglamPage() {
 
         let matched = tryPhoneAndAmountMatch(new Set(consumedProofs), customer, enrich);
         let tier: RowResult['matchTier'] = null;
+        let provavelDiff: RowResult['provavelDiff'];
         if (matched) tier = 'phone_amount';
         else {
           matched = tryNameAndAmountMatch(consumedProofs, customer, enrich);
           if (matched) tier = 'name_amount';
+        }
+
+        // Tier 1.5: se ainda não bateu, tenta match provável (phone + diff 1-10%)
+        if (!matched) {
+          const provavel = tryPhoneProvavel(new Set(consumedProofs), customer, enrich);
+          if (provavel) {
+            matched = provavel.entry;
+            tier = 'phone_provavel';
+            provavelDiff = {
+              diffAbs: provavel.diffAbs,
+              diffPct: provavel.diffPct,
+              proofValue: provavel.entry.detectedValue ?? null,
+            };
+          }
         }
 
         if (matched) consumedProofs.add(matched.proofKey);
@@ -370,6 +428,7 @@ export default function ZeglamPage() {
           matchTier: rowResults[idx].matchTier,
           conversationId: matched?.convId ?? matchedConv?.id,
           proofMessageId: matched?.proof?.message_id,
+          provavelDiff: rowResults[idx].provavelDiff,
         };
       });
 
@@ -397,6 +456,94 @@ export default function ZeglamPage() {
       if (!quiet) setRefreshing(false);
     }
   };
+
+  const loadReportStats = async () => {
+    setReportLoading(true);
+    try {
+      // 1) Stats de proofs
+      const { data: proofsAll } = await supabase
+        .from('payment_proofs')
+        .select('id, status, detected_value, conversation_id');
+      const proofs = proofsAll || [];
+      const total_proofs = proofs.length;
+      const ja_confirmados = proofs.filter((p: any) => p.status === 'confirmado').length;
+      const rejeitados = proofs.filter((p: any) => p.status === 'rejeitado').length;
+      const pendentes_total = proofs.filter((p: any) => p.status === 'pendente').length;
+      const pendentes_sem_valor = proofs.filter((p: any) => p.status === 'pendente' && !(/R\$?\s*[\d.,]+/.test(String(p.detected_value || '')))).length;
+
+      // 2) Conversations dos proofs pendentes pra contar phones validos
+      const pendingConvIds = proofs.filter((p: any) => p.status === 'pendente').map((p: any) => p.conversation_id);
+      let pendentes_phone_valido = 0;
+      let pendentes_jid_lid = 0;
+      let pendentes_com_zeglam_phone_match = 0;
+      if (pendingConvIds.length) {
+        const { data: convs } = await supabase
+          .from('conversations')
+          .select('id, customer_phone, whatsapp_jid')
+          .in('id', pendingConvIds);
+        const convArr = convs || [];
+        pendentes_phone_valido = convArr.filter((c: any) => typeof c.whatsapp_jid === 'string' && c.whatsapp_jid.endsWith('@s.whatsapp.net')).length;
+        pendentes_jid_lid = convArr.filter((c: any) => typeof c.whatsapp_jid === 'string' && c.whatsapp_jid.endsWith('@lid')).length;
+
+        // Carrega tails 8 dos pendentes Zeglam pra cruzar
+        const { data: zeg } = await supabase
+          .from('zeglam_pending_cache')
+          .select('phone_digits')
+          .not('phone_digits', 'is', null);
+        const zegTails = new Set<string>();
+        for (const z of (zeg || [])) {
+          const d = String((z as any).phone_digits || '').slice(-8);
+          if (d.length === 8) zegTails.add(d);
+        }
+        for (const c of convArr) {
+          if (typeof c.whatsapp_jid !== 'string' || !c.whatsapp_jid.endsWith('@s.whatsapp.net')) continue;
+          const tail = String(c.customer_phone || '').replace(/\D/g, '').slice(-8);
+          if (tail.length === 8 && zegTails.has(tail)) pendentes_com_zeglam_phone_match++;
+        }
+      }
+
+      // 3) Stats Zeglam pending cache
+      const { count: pendentes_total_zeglam } = await supabase
+        .from('zeglam_pending_cache')
+        .select('*', { count: 'exact', head: true });
+      const { count: pendentes_zeglam_com_phone } = await supabase
+        .from('zeglam_pending_cache')
+        .select('*', { count: 'exact', head: true })
+        .not('phone_digits', 'is', null);
+
+      // 4) Mídias com erro/null análise
+      const { count: media_falhou } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('author', 'cliente')
+        .in('media_type', ['image', 'document'])
+        .not('media_url', 'is', null)
+        .filter('media_analysis->>error', 'not.is', null);
+      const { count: media_sem_analise } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('author', 'cliente')
+        .in('media_type', ['image', 'document'])
+        .not('media_url', 'is', null)
+        .is('media_analysis', null);
+
+      setReportStats({
+        total_proofs, ja_confirmados, rejeitados, pendentes_total,
+        pendentes_phone_valido, pendentes_jid_lid, pendentes_sem_valor,
+        pendentes_com_zeglam_phone_match,
+        pendentes_total_zeglam: pendentes_total_zeglam || 0,
+        pendentes_zeglam_com_phone: pendentes_zeglam_com_phone || 0,
+        media_falhou: media_falhou || 0,
+        media_sem_analise: media_sem_analise || 0,
+      });
+    } catch (e) {
+      console.error('loadReportStats:', e);
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  useEffect(() => { if (activeTab === 'financeiro' && !reportStats) void loadReportStats(); }, [activeTab]);
 
   const closePaymentModal = () => {
     setIsModalOpen(false);
@@ -562,8 +709,9 @@ export default function ZeglamPage() {
 
   const counts = {
     todos: pendingCustomers.length,
-    com_comprovante: pendingCustomers.filter(c => c.hasProof).length,
-    sem_comprovante: pendingCustomers.filter(c => !c.hasProof).length
+    tier1: pendingCustomers.filter(c => c.matchTier === 'phone_amount').length,
+    tier2: pendingCustomers.filter(c => c.matchTier === 'name_amount').length,
+    tier3: pendingCustomers.filter(c => c.matchTier === 'phone_provavel').length,
   };
 
   const filteredPending = useMemo(() => {
@@ -571,8 +719,12 @@ export default function ZeglamPage() {
       const matchesSearch =
         normalize(customer.cliente).includes(normalize(searchText)) ||
         normalize(customer.catalogo).includes(normalize(searchText));
-      if (pendingFilter === 'com_comprovante') return matchesSearch && customer.hasProof;
-      if (pendingFilter === 'sem_comprovante') return matchesSearch && !customer.hasProof;
+      // TIER 1 = phone+valor exato (≤1%)
+      if (pendingFilter === 'tier1') return matchesSearch && customer.matchTier === 'phone_amount';
+      // TIER 2 = nome+valor exato (sem phone)
+      if (pendingFilter === 'tier2') return matchesSearch && customer.matchTier === 'name_amount';
+      // TIER 3 = phone+valor próximo (1-10%) - revisar manual
+      if (pendingFilter === 'tier3') return matchesSearch && customer.matchTier === 'phone_provavel';
       return matchesSearch;
     });
 
@@ -612,11 +764,15 @@ export default function ZeglamPage() {
 
   useEffect(() => { setPendingPage(1); }, [searchText, pendingFilter, atrasoOrder]);
 
-  /** KPIs do topo: total inadimplência R$, qtd com/sem comprovante, % match, oldest atraso. */
+  /** KPIs do topo: total inadimplência R$, qtd Tier 1/2/3, oldest atraso. */
   const kpiData = useMemo(() => {
     const totalValor = pendingCustomers.reduce((acc, c) => acc + (parseBrlAmount(c.valor) || 0), 0);
-    const comProof = pendingCustomers.filter(c => c.hasProof).length;
-    const semProof = pendingCustomers.length - comProof;
+    const tier1 = pendingCustomers.filter(c => c.matchTier === 'phone_amount').length;
+    const tier2 = pendingCustomers.filter(c => c.matchTier === 'name_amount').length;
+    const tier3 = pendingCustomers.filter(c => c.matchTier === 'phone_provavel').length;
+    const comProof = tier1 + tier2;
+    const provavel = tier3;
+    const semProof = pendingCustomers.length - comProof - provavel;
     const pctMatch = pendingCustomers.length ? Math.round((comProof / pendingCustomers.length) * 100) : 0;
     let oldestDays = 0;
     for (const c of pendingCustomers) {
@@ -629,7 +785,9 @@ export default function ZeglamPage() {
     return {
       totalValor,
       totalCount: pendingCustomers.length,
+      tier1, tier2, tier3,
       comProof,
+      provavel,
       semProof,
       pctMatch,
       oldestDays,
@@ -847,16 +1005,22 @@ export default function ZeglamPage() {
                 <div style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 2 }}>{kpiData.totalCount} clientes</div>
               </div>
 
-              <div style={{ padding: '14px 16px', borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Com comprovante</div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: '#3b82f6' }}>{kpiData.comProof}</div>
-                <div style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 2 }}>{kpiData.pctMatch}% de match auto</div>
+              <div style={{ padding: '14px 16px', borderRadius: 12, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.3)' }} title="Telefone do WhatsApp bate com cadastro + valor exato. Match seguro.">
+                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--emerald-light)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Confirmados</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--emerald-light)' }}>{kpiData.tier1}</div>
+                <div style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 2 }}>match seguro</div>
               </div>
 
-              <div style={{ padding: '14px 16px', borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Sem comprovante</div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--fg-dim)' }}>{kpiData.semProof}</div>
-                <div style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 2 }}>aguardando cobrança</div>
+              <div style={{ padding: '14px 16px', borderRadius: 12, background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.3)' }} title="Nome bate + valor exato (telefone divergiu).">
+                <div style={{ fontSize: 10, fontWeight: 800, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Prováveis</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#3b82f6' }}>{kpiData.tier2}</div>
+                <div style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 2 }}>conferir antes</div>
+              </div>
+
+              <div style={{ padding: '14px 16px', borderRadius: 12, background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)' }} title="Telefone bate, mas valor difere 1-10%. Revisar manualmente antes de dar baixa.">
+                <div style={{ fontSize: 10, fontWeight: 800, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Revisar</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#fbbf24' }}>{kpiData.tier3}</div>
+                <div style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 2 }}>valor com diferença</div>
               </div>
 
               <div style={{ padding: '14px 16px', borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)' }}>
@@ -1034,9 +1198,10 @@ export default function ZeglamPage() {
               </div>
 
               <div style={{ display: 'flex', gap: 6, background: 'var(--glass)', padding: 4, borderRadius: 10, border: '1px solid var(--border)' }}>
-                <button onClick={() => setPendingFilter('todos')} style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: pendingFilter === 'todos' ? 'var(--surface-3)' : 'transparent', color: pendingFilter === 'todos' ? 'var(--strong-text)' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>TODOS</button>
-                <button onClick={() => setPendingFilter('com_comprovante')} style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: pendingFilter === 'com_comprovante' ? 'rgba(59,130,246,0.15)' : 'transparent', color: pendingFilter === 'com_comprovante' ? '#3b82f6' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>COM COMPROVANTE ({counts.com_comprovante})</button>
-                <button onClick={() => setPendingFilter('sem_comprovante')} style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: pendingFilter === 'sem_comprovante' ? 'rgba(239,68,68,0.1)' : 'transparent', color: pendingFilter === 'sem_comprovante' ? '#ef4444' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>SEM COMPROVANTE ({counts.sem_comprovante})</button>
+                <button onClick={() => setPendingFilter('todos')} title="Todos os pendentes" style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: pendingFilter === 'todos' ? 'var(--surface-3)' : 'transparent', color: pendingFilter === 'todos' ? 'var(--strong-text)' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>TODOS ({counts.todos})</button>
+                <button onClick={() => setPendingFilter('tier1')} title="Telefone do WhatsApp bate com cadastro + valor exato. Match mais seguro." style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: pendingFilter === 'tier1' ? 'rgba(16,185,129,0.18)' : 'transparent', color: pendingFilter === 'tier1' ? 'var(--emerald-light)' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>CONFIRMADO ({counts.tier1})</button>
+                <button onClick={() => setPendingFilter('tier2')} title="Nome do cliente bate + valor exato (telefone divergiu)." style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: pendingFilter === 'tier2' ? 'rgba(59,130,246,0.18)' : 'transparent', color: pendingFilter === 'tier2' ? '#3b82f6' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>PROVÁVEL ({counts.tier2})</button>
+                <button onClick={() => setPendingFilter('tier3')} title="Telefone bate, mas valor está com 1-10% de diferença. Revisar antes de baixar." style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: pendingFilter === 'tier3' ? 'rgba(251,191,36,0.18)' : 'transparent', color: pendingFilter === 'tier3' ? '#fbbf24' : 'var(--fg-muted)', border: 'none', cursor: 'pointer' }}>REVISAR ({counts.tier3})</button>
               </div>
             </div>
 
@@ -1053,7 +1218,7 @@ export default function ZeglamPage() {
                       <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(239,68,68,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}><UserX size={12} /></div>
                       <div><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ fontSize: 13, fontWeight: 600, color: 'var(--strong-text)' }}>{item.cliente}</span><ChevronRight size={10} style={{ color: 'var(--fg-faint)' }} /></div><div style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>{item.catalogo}</div></div>
                     </div>
-                  </td><td data-label="Cruzamento" style={{ padding: '12px 20px' }}>{item.hasProof ? (item.matchTier === 'phone_amount' ? (<div title="Telefone WhatsApp + valor batendo (1%)" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(16,185,129,0.12)', color: 'var(--emerald-light)', fontSize: 10, fontWeight: 800, border: '1px solid rgba(16,185,129,0.3)' }}><FileCheck size={10} /> TEL + VALOR</div>) : item.matchTier === 'name_amount' ? (<div title="Nome no comprovante + valor batendo (1%) — telefone divergiu" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', fontSize: 10, fontWeight: 800, border: '1px solid rgba(245,158,11,0.3)' }}><FileCheck size={10} /> NOME + VALOR</div>) : (<div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(59,130,246,0.1)', color: '#3b82f6', fontSize: 10, fontWeight: 800 }}><FileCheck size={10} /> BATENDO</div>)) : (<span style={{ fontSize: 10, color: 'var(--fg-faint)', fontWeight: 600 }}>NÃO ENCONTRADO</span>)}</td><td data-label="Atraso" style={{ padding: '12px 20px' }}><span style={{ fontSize: 11, fontWeight: 600, color: item.statusType === 'danger' ? '#ef4444' : '#f59e0b' }}>{item.atraso}</span>                  </td><td data-label="Valor" style={{ padding: '12px 20px', textAlign: 'right' }}><div style={{ fontSize: 13, fontWeight: 800, color: '#ef4444' }}>{item.valor}</div></td><td data-label="Ações" style={{ padding: '12px 20px', textAlign: 'center' }}>
+                  </td><td data-label="Cruzamento" style={{ padding: '12px 20px' }}>{item.hasProof ? (item.matchTier === 'phone_amount' ? (<div title="Confirmado: telefone do WhatsApp bate com cadastro + valor exato" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(16,185,129,0.12)', color: 'var(--emerald-light)', fontSize: 10, fontWeight: 800, border: '1px solid rgba(16,185,129,0.3)' }}><FileCheck size={10} /> CONFIRMADO</div>) : item.matchTier === 'name_amount' ? (<div title="Provável: nome do cliente bate + valor exato (telefone divergiu)" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(59,130,246,0.12)', color: '#3b82f6', fontSize: 10, fontWeight: 800, border: '1px solid rgba(59,130,246,0.3)' }}><FileCheck size={10} /> PROVÁVEL</div>) : item.matchTier === 'phone_provavel' ? (<div title={item.provavelDiff ? `Revisar: telefone bate, mas valor com ${item.provavelDiff.diffPct >= 0 ? '+' : ''}${(item.provavelDiff.diffPct * 100).toFixed(1)}% (R$ ${item.provavelDiff.diffAbs.toFixed(2)}). Confira antes de dar baixa.` : 'Revisar: telefone bate, valor com diferença'} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(251,191,36,0.15)', color: '#fbbf24', fontSize: 10, fontWeight: 800, border: '1px solid rgba(251,191,36,0.45)', cursor: 'help' }}><FileCheck size={10} /> REVISAR{item.provavelDiff ? ` (${item.provavelDiff.diffPct >= 0 ? '+' : ''}${(item.provavelDiff.diffPct * 100).toFixed(1)}%)` : ''}</div>) : (<div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, background: 'rgba(59,130,246,0.1)', color: '#3b82f6', fontSize: 10, fontWeight: 800 }}><FileCheck size={10} /> BATENDO</div>)) : (<span style={{ fontSize: 10, color: 'var(--fg-faint)', fontWeight: 600 }}>NÃO ENCONTRADO</span>)}</td><td data-label="Atraso" style={{ padding: '12px 20px' }}><span style={{ fontSize: 11, fontWeight: 600, color: item.statusType === 'danger' ? '#ef4444' : '#f59e0b' }}>{item.atraso}</span>                  </td><td data-label="Valor" style={{ padding: '12px 20px', textAlign: 'right' }}><div style={{ fontSize: 13, fontWeight: 800, color: '#ef4444' }}>{item.valor}</div></td><td data-label="Ações" style={{ padding: '12px 20px', textAlign: 'center' }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
                       {item.conversationId ? (
                         <>
@@ -1164,6 +1329,131 @@ export default function ZeglamPage() {
               )}
             </div>
           </>
+        )}
+
+        {activeTab === 'financeiro' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div>
+              <h2 style={{ fontSize: 18, fontWeight: 800, color: 'var(--strong-text)', marginBottom: 4 }}>Diagnóstico de Cruzamento Comprovantes ↔ Zeglam</h2>
+              <p style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.5 }}>
+                Por que aparecem só ~13 matches dos 500+ comprovantes? Aqui está o funil real.
+              </p>
+              <button onClick={() => loadReportStats()} disabled={reportLoading} style={{ marginTop: 8, padding: '6px 12px', borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--border)', color: 'var(--fg-dim)', fontSize: 11, fontWeight: 600, cursor: reportLoading ? 'wait' : 'pointer' }}>
+                {reportLoading ? 'Calculando...' : 'Atualizar relatório'}
+              </button>
+            </div>
+
+            {!reportStats && !reportLoading && (
+              <p style={{ fontSize: 13, color: 'var(--fg-subtle)', padding: 24, textAlign: 'center' }}>Clique em "Atualizar relatório" para calcular.</p>
+            )}
+
+            {reportLoading && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+                <Loader size={20} className="spin" style={{ color: 'var(--accent)' }} />
+              </div>
+            )}
+
+            {reportStats && (
+              <>
+                {/* Funil de Comprovantes */}
+                <div style={{ background: 'var(--glass)', borderRadius: 14, border: '1px solid var(--border)', padding: 20 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 800, color: 'var(--strong-text)', marginBottom: 14 }}>📊 Funil dos {reportStats.total_proofs} comprovantes recebidos</h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {[
+                      { label: `Total recebido`, val: reportStats.total_proofs, pct: 100, color: '#3b82f6', note: 'Todos comprovantes detectados pela IA via WhatsApp' },
+                      { label: `Já confirmados (Zevaldo deu baixa no Supabase)`, val: reportStats.ja_confirmados, pct: Math.round(reportStats.ja_confirmados / reportStats.total_proofs * 100), color: 'var(--emerald-light)', note: 'Saíram do funil — não precisam mais cruzamento' },
+                      { label: `Rejeitados (falso positivo IA)`, val: reportStats.rejeitados, pct: Math.round(reportStats.rejeitados / reportStats.total_proofs * 100), color: 'var(--fg-subtle)', note: 'IA marcou como comprovante mas não era' },
+                      { label: `Pendentes ainda (não confirmados)`, val: reportStats.pendentes_total, pct: Math.round(reportStats.pendentes_total / reportStats.total_proofs * 100), color: '#fbbf24', note: 'Aguardando processamento manual ou cruzamento' },
+                    ].map((row) => (
+                      <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ flex: '0 0 60px', textAlign: 'right', fontSize: 13, fontWeight: 700, color: row.color }}>{row.val}</div>
+                        <div style={{ flex: 1, height: 22, borderRadius: 6, background: 'var(--surface-2)', overflow: 'hidden', position: 'relative' }}>
+                          <div style={{ height: '100%', width: `${row.pct}%`, background: row.color, opacity: 0.3 }} />
+                        </div>
+                        <div style={{ flex: '0 0 250px', fontSize: 11, color: 'var(--fg-dim)' }}>
+                          <strong>{row.label}</strong>
+                          <div style={{ fontSize: 10, color: 'var(--fg-faint)' }}>{row.note}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Por que pendentes não cruzam? */}
+                <div style={{ background: 'var(--glass)', borderRadius: 14, border: '1px solid var(--border)', padding: 20 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 800, color: 'var(--strong-text)', marginBottom: 4 }}>🔍 Dos {reportStats.pendentes_total} comprovantes pendentes — por que não cruzam?</h3>
+                  <p style={{ fontSize: 11, color: 'var(--fg-muted)', marginBottom: 14 }}>Funil de filtros aplicados pelo cruzamento automático.</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {[
+                      { label: `Pendentes com phone WhatsApp válido (@s.whatsapp.net)`, val: reportStats.pendentes_phone_valido, total: reportStats.pendentes_total, color: '#3b82f6', desc: 'Phone normal Brasil. Bons candidatos.' },
+                      { label: `Pendentes sem phone (JID @lid)`, val: reportStats.pendentes_jid_lid, total: reportStats.pendentes_total, color: '#fbbf24', desc: 'WhatsApp deu LID em vez de phone. Não cruza por phone.' },
+                      { label: `Pendentes sem valor extraído`, val: reportStats.pendentes_sem_valor, total: reportStats.pendentes_total, color: '#ef4444', desc: 'IA não conseguiu ler valor R$ no comprovante.' },
+                      { label: `Pendentes com phone match em algum pendente Zeglam`, val: reportStats.pendentes_com_zeglam_phone_match, total: reportStats.pendentes_phone_valido, color: 'var(--emerald-light)', desc: 'Cliente é inadimplente E mandou comprovante. Aqui sim pode virar match.' },
+                    ].map((row) => (
+                      <div key={row.label} style={{ padding: 12, borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--strong-text)' }}>{row.label}</span>
+                          <span style={{ fontSize: 14, fontWeight: 800, color: row.color }}>{row.val} <span style={{ fontSize: 10, color: 'var(--fg-faint)' }}>/ {row.total}</span></span>
+                        </div>
+                        <p style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>{row.desc}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Lado Zeglam */}
+                <div style={{ background: 'var(--glass)', borderRadius: 14, border: '1px solid var(--border)', padding: 20 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 800, color: 'var(--strong-text)', marginBottom: 14 }}>🏪 Lado Zeglam (CRM)</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div style={{ padding: 14, borderRadius: 10, background: 'var(--surface-2)' }}>
+                      <div style={{ fontSize: 10, color: 'var(--fg-faint)', textTransform: 'uppercase', fontWeight: 800 }}>Pendentes Zeglam total</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: '#ef4444', marginTop: 4 }}>{reportStats.pendentes_total_zeglam}</div>
+                      <div style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>clientes inadimplentes scrape Zeglam</div>
+                    </div>
+                    <div style={{ padding: 14, borderRadius: 10, background: 'var(--surface-2)' }}>
+                      <div style={{ fontSize: 10, color: 'var(--fg-faint)', textTransform: 'uppercase', fontWeight: 800 }}>Com phone enriquecido</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--emerald-light)', marginTop: 4 }}>{reportStats.pendentes_zeglam_com_phone}</div>
+                      <div style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>tem `phone_digits` populado pra cruzar</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Mídias com falha */}
+                <div style={{ background: 'rgba(239,68,68,0.05)', borderRadius: 14, border: '1px solid rgba(239,68,68,0.25)', padding: 20 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 800, color: '#ef4444', marginBottom: 4 }}>⚠️ Mídias enviadas SEM análise (não viraram comprovante)</h3>
+                  <p style={{ fontSize: 11, color: 'var(--fg-muted)', marginBottom: 14 }}>Imagens/PDFs do cliente que a IA não conseguiu analisar — provavelmente entre eles há comprovantes perdidos.</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div style={{ padding: 14, borderRadius: 10, background: 'var(--surface-2)' }}>
+                      <div style={{ fontSize: 10, color: 'var(--fg-faint)', textTransform: 'uppercase', fontWeight: 800 }}>Análise falhou (rate limit / quota)</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: '#ef4444', marginTop: 4 }}>{reportStats.media_falhou}</div>
+                      <div style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>OpenAI retornou erro — bulk-analyze cron está re-rodando</div>
+                    </div>
+                    <div style={{ padding: 14, borderRadius: 10, background: 'var(--surface-2)' }}>
+                      <div style={{ fontSize: 10, color: 'var(--fg-faint)', textTransform: 'uppercase', fontWeight: 800 }}>Nunca foi analisada</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: '#fbbf24', marginTop: 4 }}>{reportStats.media_sem_analise}</div>
+                      <div style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>Webhook pegou mas job de análise não rodou</div>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 12 }}>
+                    Estimativa baseline: <strong>~16% das mídias do cliente são comprovantes</strong>. Re-analisando todas, esperamos +
+                    <strong style={{ color: 'var(--emerald-light)' }}> ~{Math.round((reportStats.media_falhou + reportStats.media_sem_analise) * 0.16)} comprovantes adicionais</strong>.
+                  </p>
+                </div>
+
+                {/* Conclusão */}
+                <div style={{ background: 'rgba(212,168,67,0.06)', borderRadius: 14, border: '1px solid var(--accent-border, rgba(212,168,67,0.4))', padding: 20 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 800, color: 'var(--accent)', marginBottom: 8 }}>💡 Por que só ~13 matches?</h3>
+                  <ol style={{ fontSize: 12, color: 'var(--fg-dim)', lineHeight: 1.7, paddingLeft: 18, margin: 0 }}>
+                    <li><strong>{reportStats.ja_confirmados} comprovantes ({Math.round(reportStats.ja_confirmados / reportStats.total_proofs * 100)}%)</strong> já foram baixados — saíram do funil de match.</li>
+                    <li><strong>{reportStats.pendentes_jid_lid} pendentes</strong> chegaram com JID @lid (sem phone real) — não cruzam por phone.</li>
+                    <li>Dos <strong>{reportStats.pendentes_phone_valido} pendentes com phone</strong>, apenas <strong>{reportStats.pendentes_com_zeglam_phone_match}</strong> têm pendente Zeglam mesmo phone — resto são clientes em dia mandando comprovante de pedido recente.</li>
+                    <li>Desses {reportStats.pendentes_com_zeglam_phone_match}, só uma fração tem <strong>valor batendo</strong> (Tier 1 ≤1%) — clientes pagam parcial, com frete diferente, ou de pedido errado.</li>
+                    <li><strong>{reportStats.media_falhou + reportStats.media_sem_analise} mídias sem análise</strong> — pode ter ~{Math.round((reportStats.media_falhou + reportStats.media_sem_analise) * 0.16)} comprovantes perdidos. Bulk re-analyze rodando agora pra recuperar.</li>
+                  </ol>
+                </div>
+              </>
+            )}
+          </div>
         )}
 
         {/* Modal Overlay - 100% OPAQUE & INTEGRATED */}

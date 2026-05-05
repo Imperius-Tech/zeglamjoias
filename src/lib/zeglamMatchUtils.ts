@@ -8,7 +8,15 @@ export function normalize(str: string): string {
     .trim();
 }
 
-export function phoneTail(str: string | null | undefined, n = 9): string {
+/**
+ * Normaliza phone BR pra "DDD+8 dígitos finais" (sem 9 do celular, sem DDI).
+ * Resolve mismatch entre WhatsApp JID (alguns sem 9 em contatos antigos) vs Zeglam CRM (com 9).
+ *
+ * Exemplos:
+ *   "+55 (11) 95380-5966" → "11953805966" → tail 8 = "53805966"  ❌ ainda diferente sem DDD
+ *   Solução: tail 8 sempre, sem se importar com DDD/9. Cobre contatos antigos e novos.
+ */
+export function phoneTail(str: string | null | undefined, n = 8): string {
   if (!str) return '';
   const digits = str.replace(/\D/g, '');
   return digits.slice(-n);

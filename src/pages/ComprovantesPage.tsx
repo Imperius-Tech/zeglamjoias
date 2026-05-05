@@ -75,6 +75,9 @@ export default function ComprovantesPage() {
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkSearch, setLinkSearch] = useState('');
   const [linkSelectedSalesId, setLinkSelectedSalesId] = useState<string | null>(null);
+  /** Infinite scroll — quantos comprovantes mostrar na lista. Carrega +20 ao rolar até o fim. */
+  const [visibleCount, setVisibleCount] = useState(20);
+  const PROOFS_PAGE_SIZE = 20;
 
   useEffect(() => {
     setWhatsappNotifyError(null);
@@ -282,6 +285,18 @@ export default function ComprovantesPage() {
     return list;
   }, [proofs, filter, search]);
 
+  // Reset visibleCount quando filtro/search muda
+  useEffect(() => { setVisibleCount(PROOFS_PAGE_SIZE); }, [filter, search]);
+
+  const visibleProofs = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+
+  const handleListScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 200 && visibleCount < filtered.length) {
+      setVisibleCount((c) => Math.min(c + PROOFS_PAGE_SIZE, filtered.length));
+    }
+  };
+
   const selected = selectedId ? proofs.find((p) => p.id === selectedId) : null;
 
   const counts = {
@@ -350,7 +365,7 @@ export default function ComprovantesPage() {
         </div>
 
         {/* List */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 16px' }}>
+        <div onScroll={handleListScroll} style={{ flex: 1, overflowY: 'auto', padding: '0 8px 16px' }}>
           {filtered.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '48px 0' }}>
               <CreditCard size={32} style={{ color: 'var(--fg-faint)', margin: '0 auto 12px' }} />
@@ -359,7 +374,7 @@ export default function ComprovantesPage() {
               </p>
             </div>
           ) : (
-            filtered.map((proof) => {
+            visibleProofs.map((proof) => {
               const st = statusConfig[proof.status];
               const StIcon = st.icon;
               const isActive = selectedId === proof.id;
@@ -406,6 +421,17 @@ export default function ComprovantesPage() {
                 </div>
               );
             })
+          )}
+          {filtered.length > 0 && visibleCount < filtered.length && (
+            <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 11, color: 'var(--fg-subtle)' }}>
+              <Loader size={14} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 6, animation: 'spin 1s linear infinite' }} />
+              Carregando mais... ({visibleCount} de {filtered.length})
+            </div>
+          )}
+          {filtered.length > 0 && visibleCount >= filtered.length && filtered.length > PROOFS_PAGE_SIZE && (
+            <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 10, color: 'var(--fg-faint)' }}>
+              {filtered.length} comprovantes carregados
+            </div>
           )}
         </div>
       </div>

@@ -139,6 +139,8 @@ export default function ZeglamPage() {
   const [atrasoOrder, setAtrasoOrder] = useState<'recentes' | 'antigos'>('recentes');
   const [pendingPage, setPendingPage] = useState(1);
   const PENDING_PAGE_SIZE = 50;
+  /** Metadata do último refresh do cache Zeglam (quando atualizado, qtde, ms). */
+  const [cacheMeta, setCacheMeta] = useState<{ last_full_refresh_at: string | null; last_full_refresh_count: number | null } | null>(null);
   /** Menu suspenso de ordenação (“gaveta” / dropdown). */
   const [ordenMenuOpen, setOrdenMenuOpen] = useState(false);
   const ordenMenuWrapRef = useRef<HTMLDivElement>(null);
@@ -170,34 +172,64 @@ export default function ZeglamPage() {
     detectedValue?: string | null;
   };
 
-  const fetchData = async (opts?: { quiet?: boolean }) => {
+  const fetchData = async (opts?: { quiet?: boolean; useCache?: boolean }) => {
     const quiet = opts?.quiet === true;
+    const useCache = opts?.useCache !== false; // default true: ler cache primeiro pra UI instantânea
     if (!quiet) setRefreshing(true);
     setError(null);
     try {
-      const { data: allData, error: functionError } = await supabase.functions.invoke('zeglam-api', {
-        body: { action: 'get_all' }
-      });
+      let pendingList: any[] = [];
+      let phonesMap: Record<string, { phone_digits: string | null; customer_name: string | null }> = {};
+      let cacheHit = false;
 
-      if (functionError) throw new Error(functionError.message);
+      if (useCache) {
+        const { data: cached } = await supabase
+          .from('zeglam_pending_cache')
+          .select('sales_id, cliente, valor, atraso, catalogo, status_type, phone_digits, customer_name_zeglam')
+          .order('fetched_at', { ascending: false });
+        if (cached && cached.length > 0) {
+          pendingList = cached.map((c) => ({
+            salesId: c.sales_id,
+            cliente: c.cliente,
+            valor: c.valor,
+            atraso: c.atraso,
+            catalogo: c.catalogo,
+            statusType: c.status_type,
+          }));
+          for (const c of cached) {
+            phonesMap[c.sales_id] = {
+              phone_digits: c.phone_digits,
+              customer_name: c.customer_name_zeglam,
+            };
+          }
+          cacheHit = true;
+        }
+      }
 
-      const pendingList = allData?.pending || [];
-      const salesIds = pendingList.map((p: any) => p.salesId).filter(Boolean);
+      // Sem cache: scrape ao vivo (lento mas garantido)
+      if (!cacheHit) {
+        const { data: allData, error: functionError } = await supabase.functions.invoke('zeglam-api', {
+          body: { action: 'get_all' }
+        });
+        if (functionError) throw new Error(functionError.message);
+        pendingList = allData?.pending || [];
+        const salesIds = pendingList.map((p: any) => p.salesId).filter(Boolean);
+        if (salesIds.length > 0) {
+          const enrichRes = await supabase.functions.invoke('zeglam-api', { body: { action: 'enrich_phones', salesIds } });
+          phonesMap = (enrichRes.data || {}) as Record<string, { phone_digits: string | null; customer_name: string | null }>;
+        }
+      }
 
-      const [proofsRes, convsRes, phonesRes] = await Promise.all([
+      // Cruzamento sempre lê comprovantes/conversas direto do DB (rápido)
+      const [proofsRes, convsRes] = await Promise.all([
         supabase.from('payment_proofs')
           .select('id, customer_name, message_id, conversation_id, detected_value, created_at, status')
           .neq('status', 'rejeitado')
           .order('created_at', { ascending: false }),
         supabase.from('conversations').select('id, customer_name, customer_phone'),
-        salesIds.length > 0
-          ? supabase.functions.invoke('zeglam-api', { body: { action: 'enrich_phones', salesIds } })
-          : Promise.resolve({ data: {} })
       ]);
-
       const proofs = proofsRes.data || [];
       const conversations = convsRes.data || [];
-      const phonesMap: Record<string, { phone_digits: string | null; customer_name: string | null }> = phonesRes.data || {};
 
       const proofIndex: ProofIndexEntry[] = proofs.map((p: {
         id?: string;
@@ -346,8 +378,17 @@ export default function ZeglamPage() {
         consumedProofKeys: consumedProofs.size,
         sample: debugMatches.slice(0, 30),
       });
-      setPayments(allData?.payments || []);
+      // payments sempre vem vazio do zeglam-api atual; mantém fallback se algum dia voltar
+      setPayments([]);
       setPendingCustomers(crossedPending);
+
+      // Carrega meta do cache (não bloqueia render principal)
+      supabase
+        .from('zeglam_cache_meta')
+        .select('last_full_refresh_at, last_full_refresh_count')
+        .eq('id', 1)
+        .maybeSingle()
+        .then(({ data }) => { if (data) setCacheMeta(data as any); });
     } catch (e: any) {
       console.error('Error fetching Zeglam data:', e);
       setError(e.message || 'Erro ao conectar com o sistema Zeglam.');
@@ -571,7 +612,71 @@ export default function ZeglamPage() {
 
   useEffect(() => { setPendingPage(1); }, [searchText, pendingFilter, atrasoOrder]);
 
-  if (loading) return <div style={{ padding: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><Loader size={24} className="spin" style={{ color: 'var(--accent)' }} /></div>;
+  /** KPIs do topo: total inadimplência R$, qtd com/sem comprovante, % match, oldest atraso. */
+  const kpiData = useMemo(() => {
+    const totalValor = pendingCustomers.reduce((acc, c) => acc + (parseBrlAmount(c.valor) || 0), 0);
+    const comProof = pendingCustomers.filter(c => c.hasProof).length;
+    const semProof = pendingCustomers.length - comProof;
+    const pctMatch = pendingCustomers.length ? Math.round((comProof / pendingCustomers.length) * 100) : 0;
+    let oldestDays = 0;
+    for (const c of pendingCustomers) {
+      const ts = parseAtrasoTimestamp(c.atraso);
+      if (!Number.isNaN(ts)) {
+        const days = Math.floor((Date.now() - ts) / 86400000);
+        if (days > oldestDays) oldestDays = days;
+      }
+    }
+    return {
+      totalValor,
+      totalCount: pendingCustomers.length,
+      comProof,
+      semProof,
+      pctMatch,
+      oldestDays,
+    };
+  }, [pendingCustomers]);
+
+  /** "Atualizado há X min" baseado em cacheMeta.last_full_refresh_at. */
+  const cacheAgeLabel = useMemo(() => {
+    if (!cacheMeta?.last_full_refresh_at) return null;
+    const ageMs = Date.now() - new Date(cacheMeta.last_full_refresh_at).getTime();
+    const min = Math.floor(ageMs / 60000);
+    if (min < 1) return 'agora';
+    if (min < 60) return `há ${min} min`;
+    const h = Math.floor(min / 60);
+    return `há ${h}h`;
+  }, [cacheMeta]);
+
+  if (loading) return (
+    <div style={{ padding: '20px 24px', maxWidth: 1200, margin: '0 auto' }}>
+      <div style={{ height: 32, width: 240, borderRadius: 8, background: 'var(--glass)', marginBottom: 8 }} />
+      <div style={{ height: 14, width: 320, borderRadius: 6, background: 'var(--glass)', marginBottom: 24, opacity: 0.6 }} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} style={{ padding: 16, borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)', height: 80 }}>
+            <div style={{ height: 10, width: 80, background: 'var(--surface-2)', borderRadius: 4, marginBottom: 12 }} />
+            <div style={{ height: 22, width: 120, background: 'var(--surface-2)', borderRadius: 4 }} />
+          </div>
+        ))}
+      </div>
+      <div style={{ background: 'var(--glass)', borderRadius: 14, border: '1px solid var(--border)', padding: 16 }}>
+        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: i < 6 ? '1px solid var(--border)' : 'none', opacity: 1 - (i * 0.1) }}>
+            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--surface-2)' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ height: 12, width: '60%', background: 'var(--surface-2)', borderRadius: 4, marginBottom: 6 }} />
+              <div style={{ height: 10, width: '40%', background: 'var(--surface-2)', borderRadius: 4, opacity: 0.6 }} />
+            </div>
+            <div style={{ height: 14, width: 80, background: 'var(--surface-2)', borderRadius: 4 }} />
+          </div>
+        ))}
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--fg-subtle)', textAlign: 'center', marginTop: 16 }}>
+        <Loader size={12} className="spin" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }} />
+        Carregando inadimplentes...
+      </p>
+    </div>
+  );
 
   return (
     <div className="zeglam-page" style={{ height: '100%', overflowY: 'auto', padding: '20px 24px' }}>
@@ -584,7 +689,13 @@ export default function ZeglamPage() {
             <p style={{ fontSize: 12, color: 'var(--fg-subtle)', margin: '2px 0 0' }}>Conferência de pagamentos e inadimplência</p>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            <button onClick={() => fetchData()} disabled={refreshing} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 10, background: 'var(--glass)', border: '1px solid var(--border)', cursor: refreshing ? 'wait' : 'pointer', color: 'var(--fg-muted)', fontSize: 12, fontWeight: 600 }}>
+            <button onClick={async () => {
+              setRefreshing(true);
+              try {
+                await supabase.functions.invoke('zeglam-cache-refresh', { body: { mode: 'pending_only' } });
+              } catch {}
+              await fetchData({ useCache: true });
+            }} disabled={refreshing} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 10, background: 'var(--glass)', border: '1px solid var(--border)', cursor: refreshing ? 'wait' : 'pointer', color: 'var(--fg-muted)', fontSize: 12, fontWeight: 600 }}>
               <RefreshCw size={14} className={refreshing ? 'spin' : ''} /> {refreshing ? 'Buscando...' : 'Atualizar'}
             </button>
             <a href="https://zeglam.semijoias.net/admin/" target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 10, background: 'var(--accent)', color: '#000', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
@@ -721,6 +832,44 @@ export default function ZeglamPage() {
 
         {activeTab === 'inadimplentes' && (
           <>
+            {/* KPIs */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: 12,
+              marginBottom: 16,
+            }}>
+              <div style={{ padding: '14px 16px', borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Inadimplência total</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#ef4444' }}>
+                  R$ {kpiData.totalValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 2 }}>{kpiData.totalCount} clientes</div>
+              </div>
+
+              <div style={{ padding: '14px 16px', borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Com comprovante</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#3b82f6' }}>{kpiData.comProof}</div>
+                <div style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 2 }}>{kpiData.pctMatch}% de match auto</div>
+              </div>
+
+              <div style={{ padding: '14px 16px', borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Sem comprovante</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--fg-dim)' }}>{kpiData.semProof}</div>
+                <div style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 2 }}>aguardando cobrança</div>
+              </div>
+
+              <div style={{ padding: '14px 16px', borderRadius: 12, background: 'var(--glass)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Maior atraso</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: kpiData.oldestDays > 90 ? '#ef4444' : '#f59e0b' }}>
+                  {kpiData.oldestDays > 0 ? `${kpiData.oldestDays}d` : '—'}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                  {cacheAgeLabel ? `dados atualizados ${cacheAgeLabel}` : 'cache não configurado'}
+                </div>
+              </div>
+            </div>
+
             {/* Search and Filters - RESTORED */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
               <div style={{ position: 'relative', flex: 1, minWidth: 260 }}>

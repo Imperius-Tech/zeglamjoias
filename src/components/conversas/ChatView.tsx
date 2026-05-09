@@ -12,7 +12,7 @@ import {
 } from '@/lib/groupIntakeTemplate';
 import { MessageBubble } from './MessageBubble';
 import { GroupCandidateCard } from './GroupCandidateCard';
-import type { ConversationStatus, Message } from '@/lib/mock-data';
+import type { ConversationStatus, ConversationType, Message } from '@/lib/mock-data';
 
 const statusLabels: Record<ConversationStatus, { label: string; color: string }> = {
   ia_respondendo: { label: 'IA respondendo', color: 'var(--emerald-light)' },
@@ -20,6 +20,8 @@ const statusLabels: Record<ConversationStatus, { label: string; color: string }>
   silenciada: { label: 'Silenciada', color: 'var(--red-light)' },
   encerrada: { label: 'Encerrada', color: 'var(--fg-subtle)' },
 };
+
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
 const avatarGradients = [
   'linear-gradient(135deg,#f43f5e,#db2777)', 'linear-gradient(135deg,#8b5cf6,#7c3aed)',
@@ -54,6 +56,7 @@ export function ChatView() {
   /** Bolhas do template de entrada no grupo — espelha `knowledge_entries` (atendimento / entrar no grupo). */
   const [groupIntakeBubbles, setGroupIntakeBubbles] = useState<string[]>(() => [...DEFAULT_GROUP_INTAKE_BUBBLES]);
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const [typeUpdating, setTypeUpdating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -72,6 +75,24 @@ export function ChatView() {
       alive = false;
     };
   }, []);
+
+  const sendViaEvolution = async (opts: { conversationId: string; text: string }) => {
+    const { conversationId, text } = opts;
+    const payload: Record<string, unknown> = { conversationId, text };
+    if (instanceId) payload.instanceId = instanceId;
+
+    const { data, error } = await supabase.functions.invoke('evolution-send', { body: payload });
+    const dataObj = (data && typeof data === 'object') ? (data as Record<string, unknown>) : null;
+    const dataError = dataObj?.error;
+    const dataMessage = dataObj?.message;
+    const message = (typeof dataError === 'string' && dataError.trim())
+      ? dataError
+      : (typeof dataMessage === 'string' && dataMessage.trim())
+      ? dataMessage
+      : null;
+    if (error) throw new Error(error.message || 'Falha ao enviar mensagem (evolution-send).');
+    if (message) throw new Error(message);
+  };
 
   // Tick de 500ms pra atualizar contador (buffer pendente OU draft com autoSendAt)
   useEffect(() => {
@@ -177,6 +198,38 @@ export function ChatView() {
     ? { label: 'IA pausada', color: 'var(--fg-subtle)' }
     : statusLabels[conv.status];
 
+  const setConversationClassification = async (next: ConversationType) => {
+    if (typeUpdating || conv.isGroup) return;
+    const prev = conv.conversationType;
+    if (prev === next) return;
+    setTypeUpdating(true);
+    useDashboardStore.setState((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === conv.id ? { ...c, conversationType: next } : c
+      ),
+    }));
+    try {
+      if (!DEMO_MODE) {
+        const dbValue = next === 'unknown' ? null : next;
+        const { error } = await supabase
+          .from('conversations')
+          .update({ conversation_type: dbValue })
+          .eq('id', conv.id);
+        if (error) throw error;
+      }
+    } catch (e) {
+      console.error('[ChatView] conversation_type update:', e);
+      useDashboardStore.setState((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === conv.id ? { ...c, conversationType: prev } : c
+        ),
+      }));
+      window.alert('Não foi possível salvar a classificação. Tente novamente.');
+    } finally {
+      setTypeUpdating(false);
+    }
+  };
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {/* Header - Aligned 72px */}
@@ -197,10 +250,78 @@ export function ChatView() {
               <div style={{ width: 40, height: 40, borderRadius: '50%', background: pickGradient(conv.customerName), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 700, color: '#fff', flexShrink: 0 }}>{conv.customerName[0]?.toUpperCase()}</div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--strong-text)', letterSpacing: '-0.01em' }}>{conv.customerName}</span>
-                {conv.conversationType === 'personal' && <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: 'rgba(139,92,246,0.15)', color: '#a78bfa', fontWeight: 900 }}>P</span>}
-                {conv.conversationType === 'business' && <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: 'rgba(16,185,129,0.15)', color: 'var(--emerald-light)', fontWeight: 900 }}>N</span>}
+                {!conv.isGroup && (
+                  <div
+                    style={{ display: 'inline-flex', alignItems: 'stretch', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)', flexShrink: 0 }}
+                    title="Classificação manual: N = negócio, P = pessoal. ? = indefinido (sem N/P até nova detecção)."
+                  >
+                    <button
+                      type="button"
+                      disabled={typeUpdating}
+                      onClick={() => void setConversationClassification('business')}
+                      style={{
+                        minWidth: 28,
+                        padding: '5px 10px',
+                        fontSize: 12,
+                        fontWeight: 900,
+                        border: 'none',
+                        cursor: typeUpdating ? 'wait' : 'pointer',
+                        background: conv.conversationType === 'business' ? 'rgba(16,185,129,0.28)' : 'var(--glass)',
+                        color: conv.conversationType === 'business' ? 'var(--emerald-light)' : 'var(--fg-subtle)',
+                        lineHeight: 1.15,
+                      }}
+                    >
+                      N
+                    </button>
+                    <button
+                      type="button"
+                      disabled={typeUpdating}
+                      onClick={() => void setConversationClassification('personal')}
+                      style={{
+                        minWidth: 28,
+                        padding: '5px 10px',
+                        fontSize: 12,
+                        fontWeight: 900,
+                        border: 'none',
+                        borderLeft: '1px solid var(--border)',
+                        cursor: typeUpdating ? 'wait' : 'pointer',
+                        background: conv.conversationType === 'personal' ? 'rgba(139,92,246,0.28)' : 'var(--glass)',
+                        color: conv.conversationType === 'personal' ? '#a78bfa' : 'var(--fg-subtle)',
+                        lineHeight: 1.15,
+                      }}
+                    >
+                      P
+                    </button>
+                    <button
+                      type="button"
+                      disabled={typeUpdating}
+                      onClick={() => void setConversationClassification('unknown')}
+                      style={{
+                        minWidth: 26,
+                        padding: '5px 8px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        border: 'none',
+                        borderLeft: '1px solid var(--border)',
+                        cursor: typeUpdating ? 'wait' : 'pointer',
+                        background: conv.conversationType === 'unknown' ? 'var(--surface-2)' : 'var(--glass)',
+                        color: 'var(--fg-subtle)',
+                        lineHeight: 1.15,
+                      }}
+                      title="Indefinido — remove N/P até nova detecção"
+                    >
+                      ?
+                    </button>
+                  </div>
+                )}
+                {conv.isGroup && conv.conversationType === 'personal' && (
+                  <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: 'rgba(139,92,246,0.15)', color: '#a78bfa', fontWeight: 900 }}>P</span>
+                )}
+                {conv.isGroup && conv.conversationType === 'business' && (
+                  <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: 'rgba(16,185,129,0.15)', color: 'var(--emerald-light)', fontWeight: 900 }}>N</span>
+                )}
                 <span style={{ fontSize: 10, fontWeight: 600, color: st.color, padding: '2px 8px', borderRadius: 6, background: 'var(--glass-strong)' }}>{st.label}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-subtle)' }}>
@@ -360,12 +481,17 @@ export function ChatView() {
         const templates = omitGroupIntakeVendorIfAlreadyMentioned(groupIntakeBubbles, customerBlob);
 
         const sendTemplate = async () => {
-          // Usa edge send-group-intake-template (anti-ban: RPC evolution_can_send + delay 10-15s entre bubbles + variação texto + log central)
-          // NÃO mandar via loop direto evolution-send — bypass-prone e gatilha anti-ban Meta
-          await supabase.functions.invoke('send-group-intake-template', {
-            body: { conversationId: conv.id, force: true, skipMembershipCheck: false },
-          });
-          await supabase.from('conversations').update({ status: 'aguardando_humano' }).eq('id', conv.id);
+          try {
+            // Edge send-group-intake-template (anti-ban: delays + variação; não loop direto evolution-send)
+            const { error } = await supabase.functions.invoke('send-group-intake-template', {
+              body: { conversationId: conv.id, force: true, skipMembershipCheck: false },
+            });
+            if (error) throw error;
+            await supabase.from('conversations').update({ status: 'aguardando_humano' }).eq('id', conv.id);
+          } catch (e) {
+            console.error('[ChatView] send-group-intake-template failed:', e);
+            window.alert('Não foi possível enviar o template no WhatsApp. Verifique a instância Evolution e tente novamente.');
+          }
         };
 
         const dismissTemplate = () => {
@@ -513,14 +639,19 @@ export function ChatView() {
 
         const approveAndSend = async (chosen: Message) => {
           const allIds = suggestions.map((s) => s.id);
-          useDashboardStore.setState((state) => ({
-            conversations: state.conversations.map((c) =>
-              c.id === conv.id ? { ...c, messages: c.messages.filter((m) => !allIds.includes(m.id)), status: 'aguardando_humano' } : c
-            ),
-          }));
-          supabase.functions.invoke('evolution-send', { body: { conversationId: conv.id, text: chosen.content } });
-          await supabase.from('messages').delete().in('id', allIds);
-          await supabase.from('conversations').update({ status: 'aguardando_humano' }).eq('id', conv.id);
+          try {
+            await sendViaEvolution({ conversationId: conv.id, text: String(chosen.content || '') });
+            useDashboardStore.setState((state) => ({
+              conversations: state.conversations.map((c) =>
+                c.id === conv.id ? { ...c, messages: c.messages.filter((m) => !allIds.includes(m.id)), status: 'aguardando_humano' } : c
+              ),
+            }));
+            await supabase.from('messages').delete().in('id', allIds);
+            await supabase.from('conversations').update({ status: 'aguardando_humano' }).eq('id', conv.id);
+          } catch (e) {
+            console.error('[ChatView] evolution-send suggestion failed:', e);
+            window.alert('Não foi possível enviar a mensagem no WhatsApp. Verifique a instância Evolution e tente novamente.');
+          }
         };
 
         const discardAll = async () => {
@@ -748,7 +879,24 @@ export function ChatView() {
                 c.id === conv.id ? { ...c, messages: [...c.messages, { id: tempId, author: 'humano', content: text, timestamp: new Date(), status: 'sent' }], lastMessageAt: new Date() } : c
               ),
             }));
-            supabase.functions.invoke('evolution-send', { body: { conversationId: conv.id, text } });
+            void (async () => {
+              try {
+                await sendViaEvolution({ conversationId: conv.id, text });
+              } catch (err) {
+                console.error('[ChatView] evolution-send manual failed:', err);
+                useDashboardStore.setState((state) => ({
+                  conversations: state.conversations.map((c) =>
+                    c.id === conv.id
+                      ? {
+                        ...c,
+                        messages: c.messages.map((m) => m.id === tempId ? { ...m, status: 'error' } : m),
+                      }
+                      : c
+                  ),
+                }));
+                window.alert('Não foi possível enviar a mensagem no WhatsApp. Verifique a instância Evolution e tente novamente.');
+              }
+            })();
           }}
           style={{ display: 'flex', alignItems: 'center', gap: 12 }}
         >

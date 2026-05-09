@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  RefreshCw, 
-  Loader, 
-  ExternalLink, 
+  RefreshCw,
+  Loader,
+  ExternalLink,
   AlertCircle,
   CheckCircle2,
   Clock,
@@ -27,6 +27,7 @@ import {
   ChevronDown,
   Check,
   Banknote,
+  Receipt,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useDashboardStore } from '@/lib/store';
@@ -59,6 +60,7 @@ interface PendingCustomer {
   matchTier?: 'phone_amount' | 'name_amount' | 'phone_provavel' | null;
   conversationId?: string;
   proofMessageId?: string;
+  proofId?: string;
   provavelDiff?: { diffAbs: number; diffPct: number; proofValue: string | null };
 }
 
@@ -135,6 +137,19 @@ export default function ZeglamPage() {
   const [notifyZeglamCustomerOnConfirm, setNotifyZeglamCustomerOnConfirm] = useState(true);
   /** Aviso após confirmar com “não notificar” sem campo detectável no HTML (configure secrets ou confira o form Zeglam). */
   const [zeglamNotifyInfoBanner, setZeglamNotifyInfoBanner] = useState<string | null>(null);
+  /** Comprovante que gerou o match para o cliente selecionado no modal. */
+  const [modalProof, setModalProof] = useState<{
+    id: string;
+    media_url: string | null;
+    detected_value: string | null;
+    customer_name: string | null;
+    created_at: string;
+    payer_name?: string | null;
+    bank?: string | null;
+    payment_date?: string | null;
+  } | null>(null);
+  /** Estado de hover-zoom no preview do comprovante (origem do transform). */
+  const [proofHoverZoom, setProofHoverZoom] = useState<{ active: boolean; x: number; y: number }>({ active: false, x: 50, y: 50 });
   const [error, setError] = useState<string | null>(null);
   const [pendingFilter, setPendingFilter] = useState<'todos' | 'tier1' | 'tier2' | 'tier3'>('todos');
   const [atrasoOrder, setAtrasoOrder] = useState<'recentes' | 'antigos'>('recentes');
@@ -428,6 +443,7 @@ export default function ZeglamPage() {
           matchTier: rowResults[idx].matchTier,
           conversationId: matched?.convId ?? matchedConv?.id,
           proofMessageId: matched?.proof?.message_id,
+          proofId: matched?.proofKey,
           provavelDiff: rowResults[idx].provavelDiff,
         };
       });
@@ -555,6 +571,8 @@ export default function ZeglamPage() {
     setPaymentDetails(null);
     setDetailLoading(false);
     setNotifyZeglamCustomerOnConfirm(true);
+    setModalProof(null);
+    setProofHoverZoom({ active: false, x: 50, y: 50 });
   };
 
   const sendZeglamCobrarWhatsApp = async (opts: {
@@ -611,9 +629,27 @@ export default function ZeglamPage() {
     setIsModalOpen(true);
     setDetailLoading(true);
     setPaymentDetails(null);
+    setModalProof(null);
+
+    // Busca comprovante pelo UUID (não bloqueia o modal)
+    const proofId = row?.proofId;
+    if (proofId && typeof proofId === 'string' && !proofId.includes(':')) {
+      void (async () => {
+        try {
+          const { data: pf } = await supabase
+            .from('payment_proofs')
+            .select('id, media_url, detected_value, customer_name, created_at')
+            .eq('id', proofId)
+            .maybeSingle();
+          if (!pf) return;
+          setModalProof({ ...pf, payer_name: null, bank: null, payment_date: null });
+        } catch { /* preview é não-crítico */ }
+      })();
+    }
+
     try {
-      const { data: details, error: detailError } = await supabase.functions.invoke('zeglam-api', { 
-        body: { action: 'get_payment_details', salesId } 
+      const { data: details, error: detailError } = await supabase.functions.invoke('zeglam-api', {
+        body: { action: 'get_payment_details', salesId }
       });
       if (detailError) throw detailError;
       setPaymentDetails(details as Record<string, string>);
@@ -1469,19 +1505,20 @@ export default function ZeglamPage() {
             padding: 20
           }} onClick={closePaymentModal}>
             
-            <div 
+            <div
                 className="modal-solid-container"
-                style={{ 
-                    width: '100%', 
-                    maxWidth: 440, 
-                    borderRadius: 20, 
+                style={{
+                    width: '100%',
+                    maxWidth: modalProof?.media_url ? 820 : 440,
+                    borderRadius: 20,
                     boxShadow: '0 0 0 1px var(--accent), 0 30px 60px -12px rgba(0,0,0,0.9)',
                     position: 'relative',
                     overflow: 'hidden',
                     display: 'flex',
                     flexDirection: 'column',
-                    background: '#0d0d0d'
-                }} 
+                    background: '#0d0d0d',
+                    transition: 'max-width 0.3s ease',
+                }}
                 onClick={e => e.stopPropagation()}
             >
               
@@ -1508,7 +1545,10 @@ export default function ZeglamPage() {
               </div>
 
               {/* Content */}
-              <div style={{ padding: '20px', maxHeight: '80vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', maxHeight: '80vh' }}>
+
+                {/* Painel esquerdo: dados e ações */}
+                <div style={{ flex: '0 0 440px', padding: '20px', overflowY: 'auto', minWidth: 0 }}>
                 {detailLoading ? (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 0', gap: 12 }}>
                       <Loader size={28} className="spin" style={{ color: 'var(--accent)' }} />
@@ -1745,7 +1785,123 @@ export default function ZeglamPage() {
                       <p style={{ color: 'var(--fg-subtle)', fontWeight: 700, fontSize: 14 }}>Não conseguimos carregar os dados.</p>
                   </div>
                 )}
-              </div>
+                </div>
+
+                {/* Painel direito: preview do comprovante */}
+                {(() => {
+                  const modalRow = pendingCustomers.find((c) => String(c.salesId) === String(modalSalesId));
+                  const tier = modalRow?.matchTier;
+                  const tierLabel = tier === 'phone_amount' ? 'CONFIRMADO' : tier === 'name_amount' ? 'PROVÁVEL' : tier === 'phone_provavel' ? 'REVISAR' : null;
+                  const tierColor = tier === 'phone_amount' ? '#10b981' : tier === 'name_amount' ? '#60a5fa' : '#f59e0b';
+                  if (!tierLabel && !modalProof) return null;
+                  return (
+                    <div style={{ width: 340, borderLeft: '1px solid #1e1e1e', background: '#080808', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+                      {/* Cabeçalho do painel */}
+                      <div style={{ padding: '14px 16px', borderBottom: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Receipt size={12} style={{ color: '#555' }} />
+                          <span style={{ fontSize: 10, fontWeight: 800, color: '#555', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Comprovante</span>
+                        </div>
+                        {tierLabel && (
+                          <span style={{ fontSize: 9, fontWeight: 800, padding: '3px 10px', borderRadius: 20, background: tierColor, color: '#000', letterSpacing: '0.05em' }}>
+                            {tierLabel}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Preview do comprovante (img ou pdf) */}
+                      <div style={{ flex: 1, padding: '12px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                        {modalProof ? (
+                          modalProof.media_url ? (
+                            (() => {
+                              const url = modalProof.media_url;
+                              const isPdf = /\.pdf(\?|$)/i.test(url);
+                              return (
+                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 10, overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.6)', border: '1px solid #2a2a2a', background: '#fff', position: 'relative', minHeight: 0 }}>
+                                  {isPdf ? (
+                                    <iframe
+                                      src={`${url}#toolbar=0&navpanes=0&view=FitH`}
+                                      title="Comprovante PDF"
+                                      style={{ flex: 1, width: '100%', border: 'none', background: '#fff', minHeight: 400 }}
+                                    />
+                                  ) : (
+                                    <div
+                                      onMouseMove={(e) => {
+                                        const rect = e.currentTarget.getBoundingClientRect();
+                                        const x = ((e.clientX - rect.left) / rect.width) * 100;
+                                        const y = ((e.clientY - rect.top) / rect.height) * 100;
+                                        setProofHoverZoom({ active: true, x, y });
+                                      }}
+                                      onMouseLeave={() => setProofHoverZoom({ active: false, x: 50, y: 50 })}
+                                      onClick={() => window.open(`/comprovante-viewer?url=${encodeURIComponent(url)}`, '_blank', 'noopener,noreferrer')}
+                                      title="Mover o mouse para zoom · clique para abrir visualizador completo"
+                                      style={{
+                                        width: '100%',
+                                        overflow: 'hidden',
+                                        cursor: 'zoom-in',
+                                        background: '#f8f8f8',
+                                        position: 'relative',
+                                      }}
+                                    >
+                                      <img
+                                        src={url}
+                                        alt="Comprovante de pagamento"
+                                        style={{
+                                          width: '100%',
+                                          display: 'block',
+                                          transition: proofHoverZoom.active ? 'none' : 'transform 0.25s ease-out',
+                                          transformOrigin: `${proofHoverZoom.x}% ${proofHoverZoom.y}%`,
+                                          transform: proofHoverZoom.active ? 'scale(2.6)' : 'scale(1)',
+                                          willChange: 'transform',
+                                        }}
+                                        onError={(e) => {
+                                          const el = e.target as HTMLImageElement;
+                                          const wrapper = el.parentElement?.parentElement;
+                                          if (wrapper) {
+                                            const viewer = `/comprovante-viewer?url=${encodeURIComponent(url)}`;
+                                            wrapper.innerHTML = `<div style="padding:24px;text-align:center;color:#888;font-size:12px;background:#1a1a1a">Não foi possível carregar a imagem.<br/><a href="${viewer}" target="_blank" rel="noopener noreferrer" style="color:#fbbf24;text-decoration:underline;font-weight:700;display:inline-block;margin-top:8px">Abrir em nova aba ↗</a></div>`;
+                                          }
+                                        }}
+                                      />
+                                    </div>
+                                  )}
+                                  {/* Badge de instrução durante hover */}
+                                  {!isPdf && proofHoverZoom.active && (
+                                    <div style={{ position: 'absolute', bottom: 8, left: 8, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)', borderRadius: 6, padding: '5px 10px', fontSize: 10, fontWeight: 700, color: '#fff', pointerEvents: 'none', zIndex: 2 }}>
+                                      🔍 Zoom · clique para visualizador
+                                    </div>
+                                  )}
+                                  <a
+                                    href={`/comprovante-viewer?url=${encodeURIComponent(url)}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title="Abrir em nova aba com zoom"
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)', borderRadius: 6, padding: '5px 10px', fontSize: 10, fontWeight: 700, color: '#fff', textDecoration: 'none', zIndex: 2 }}
+                                  >
+                                    {isPdf ? 'Abrir PDF ↗' : 'Nova aba ↗'}
+                                  </a>
+                                </div>
+                              );
+                            })()
+                          ) : (
+                            <div style={{ flex: 1, minHeight: 200, borderRadius: 10, background: '#111', border: '1px solid #222', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                              <Receipt size={32} style={{ color: '#333' }} />
+                              <span style={{ fontSize: 11, color: '#444' }}>Mídia não disponível</span>
+                            </div>
+                          )
+                        ) : (
+                          <div style={{ flex: 1, minHeight: 200, borderRadius: 10, background: '#111', border: '1px solid #1e1e1e', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                            <Loader size={20} className="spin" style={{ color: '#333' }} />
+                            <span style={{ fontSize: 11, color: '#444' }}>Carregando…</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+              </div>{/* fim do flex-row de content */}
 
             </div>
           </div>
@@ -1753,7 +1909,8 @@ export default function ZeglamPage() {
 
       </div>
       <style>{`
-        .spin { animation: spin 1s linear infinite; } 
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } } 
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes zeglamOrdenIn {
           from { opacity: 0; transform: translateY(-8px); }

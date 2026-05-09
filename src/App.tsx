@@ -14,6 +14,7 @@ import ConfiguracoesPage from '@/pages/ConfiguracoesPage';
 import InteressadosPage from '@/pages/InteressadosPage';
 import LoginPage from '@/pages/LoginPage';
 import ZeglamPage from '@/pages/ZeglamPage';
+import ComprovanteViewerPage from '@/pages/ComprovanteViewerPage';
 import { Loader } from 'lucide-react';
 
 export default function App() {
@@ -91,8 +92,9 @@ export default function App() {
     <div className="noise">
       <Routes>
         <Route path="/login" element={session ? <Navigate to="/conversas" replace /> : <LoginPage />} />
-        <Route 
-          path="/*" 
+        <Route path="/comprovante-viewer" element={<ComprovanteViewerPage />} />
+        <Route
+          path="/*"
           element={
             !session ? <Navigate to="/login" replace /> : (
               <DashboardShell>

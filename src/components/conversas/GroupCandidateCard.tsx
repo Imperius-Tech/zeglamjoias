@@ -122,7 +122,10 @@ export function GroupCandidateCard({ conv }: { conv: Conversation }) {
       const { data: res, error } = await supabase.functions.invoke('group-membership', {
         body: { action: 'add', conversationId: conv.id },
       });
-      if (error || res?.error || res?.success === false) {
+      // Se success=false mas há inviteUrl, ainda exibe como sucesso parcial (link disponível)
+      const hasInviteUrl = !!(res?.inviteUrl || res?.invite_url);
+      const isHardError = (error || res?.error) || (res?.success === false && !hasInviteUrl);
+      if (isHardError) {
         const raw = (res?.error || error?.message || 'erro ao adicionar').toString();
         let friendly = raw;
         if (raw === 'invite_code_failed') friendly = 'Bot não é admin do grupo. Use o link manual ou promova o Zevaldo a admin.';

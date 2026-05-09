@@ -360,10 +360,11 @@ export function ChatView() {
         const templates = omitGroupIntakeVendorIfAlreadyMentioned(groupIntakeBubbles, customerBlob);
 
         const sendTemplate = async () => {
-          for (const text of templates) {
-            await supabase.functions.invoke('evolution-send', { body: { conversationId: conv.id, text } });
-            await new Promise((r) => setTimeout(r, 700));
-          }
+          // Usa edge send-group-intake-template (anti-ban: RPC evolution_can_send + delay 10-15s entre bubbles + variação texto + log central)
+          // NÃO mandar via loop direto evolution-send — bypass-prone e gatilha anti-ban Meta
+          await supabase.functions.invoke('send-group-intake-template', {
+            body: { conversationId: conv.id, force: true, skipMembershipCheck: false },
+          });
           await supabase.from('conversations').update({ status: 'aguardando_humano' }).eq('id', conv.id);
         };
 

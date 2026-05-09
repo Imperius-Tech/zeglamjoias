@@ -355,7 +355,7 @@ export function IntegrationSection() {
     let remaining = 1;
     while (remaining > 0) {
       try {
-        const { data } = await supabase.functions.invoke('evolution-media-download', { body: { instanceName } });
+        const { data } = await supabase.functions.invoke('evolution-media-download', { body: { instanceName, instanceId: activeInstanceId } });
         if (!data) break;
         remaining = data.remaining || 0;
         if (data.downloaded > 0) {
@@ -398,7 +398,7 @@ export function IntegrationSection() {
       let safetyStop = 0;
       while (remaining > 0 && safetyStop < 500 && !cancelDownloadRef.current) {
         safetyStop++;
-        const { data } = await supabase.functions.invoke('evolution-media-download', { body: { instanceName: targetInstance } });
+        const { data } = await supabase.functions.invoke('evolution-media-download', { body: { instanceName: targetInstance, instanceId: activeInstanceId } });
         if (cancelDownloadRef.current) break;
         if (!data) break;
         remaining = data.remaining || 0;

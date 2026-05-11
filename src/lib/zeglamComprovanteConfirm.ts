@@ -174,25 +174,37 @@ export async function findBestZeglamPendingForProof(
 export async function confirmProofPaymentInZeglam(
   supabase: SupabaseClient,
   proof: ProofForZeglamConfirm,
-  opts?: { /** Default `true`. `false` tenta suprimir o aviso automático do Zeglam (form scrape ou secrets). */
-    notifyCustomer?: boolean },
+  opts?: {
+    /** Default `true`. `false` tenta suprimir o aviso automático do Zeglam. */
+    notifyCustomer?: boolean;
+    /** Se vier, pula findBest e usa direto. Usado quando UI já confirma auto-match. */
+    forceSalesId?: string;
+  },
 ): Promise<
   | { ok: true; salesId: string; clientNotifySuppressionUnconfigured?: boolean }
   | { ok: false; error: string; needsManualZeglam?: boolean }
 > {
   const notifyCustomer = opts?.notifyCustomer !== false;
-  const match = await findBestZeglamPendingForProof(supabase, proof);
-  if (!match) {
-    return {
-      ok: false,
-      needsManualZeglam: true,
-      error:
-        'Não encontramos pendência no Zeglam com o mesmo valor e nome/telefone deste comprovante. Confira em Sistema Zeglam ou ajuste o vínculo.',
-    };
+  const forceSalesId = opts?.forceSalesId;
+
+  let salesId: string;
+  if (forceSalesId) {
+    salesId = forceSalesId;
+  } else {
+    const match = await findBestZeglamPendingForProof(supabase, proof);
+    if (!match) {
+      return {
+        ok: false,
+        needsManualZeglam: true,
+        error:
+          'Não encontramos pendência no Zeglam com o mesmo valor e nome/telefone deste comprovante. Confira em Sistema Zeglam ou ajuste o vínculo.',
+      };
+    }
+    salesId = match.salesId;
   }
 
   const { data: details, error: dErr } = await supabase.functions.invoke('zeglam-api', {
-    body: { action: 'get_payment_details', salesId: match.salesId },
+    body: { action: 'get_payment_details', salesId },
   });
   if (dErr) {
     return { ok: false, error: dErr.message };
@@ -208,7 +220,7 @@ export async function confirmProofPaymentInZeglam(
   const { data, error } = await supabase.functions.invoke('zeglam-api', {
     body: {
       action: 'confirm_payment',
-      salesId: match.salesId,
+      salesId,
       openAmount: saldo,
       totalPay: saldo,
       percentualEntrada: 100,
@@ -249,7 +261,7 @@ export async function confirmProofPaymentInZeglam(
 
   return {
     ok: true,
-    salesId: match.salesId,
+    salesId,
     ...(body?.clientNotifySuppressionUnconfigured ? { clientNotifySuppressionUnconfigured: true } : {}),
   };
 }

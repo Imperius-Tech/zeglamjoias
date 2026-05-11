@@ -248,7 +248,7 @@ export default function ZeglamPage() {
       // Cruzamento sempre lê comprovantes/conversas direto do DB (rápido)
       const [proofsRes, convsRes] = await Promise.all([
         supabase.from('payment_proofs')
-          .select('id, customer_name, message_id, conversation_id, detected_value, created_at, status')
+          .select('id, customer_name, message_id, conversation_id, detected_value, created_at, status, auto_matched_sales_id, auto_match_tier')
           .neq('status', 'rejeitado')
           .order('created_at', { ascending: false }),
         supabase.from('conversations').select('id, customer_name, customer_phone'),
@@ -373,13 +373,32 @@ export default function ZeglamPage() {
       const rowResults = pendingList.map((customer: any): RowResult => {
         const enrich = customer.salesId ? phonesMap[customer.salesId] : null;
 
-        let matched = tryPhoneAndAmountMatch(new Set(consumedProofs), customer, enrich);
+        // Tier 0: shortcut auto-match (proof.auto_matched_sales_id === customer.salesId)
+        let matched: ProofIndexEntry | null = null;
         let tier: RowResult['matchTier'] = null;
         let provavelDiff: RowResult['provavelDiff'];
-        if (matched) tier = 'phone_amount';
-        else {
-          matched = tryNameAndAmountMatch(consumedProofs, customer, enrich);
-          if (matched) tier = 'name_amount';
+        if (customer.salesId) {
+          const autoMatched = proofIndex.find((p) =>
+            !consumedProofs.has(p.proofKey) &&
+            (p.proof as any)?.auto_matched_sales_id === customer.salesId,
+          );
+          if (autoMatched) {
+            matched = autoMatched;
+            const autoTier = (autoMatched.proof as any)?.auto_match_tier;
+            if (autoTier === 'phone_amount') tier = 'phone_amount';
+            else if (autoTier === 'name_amount' || autoTier === 'payer_name_amount') tier = 'name_amount';
+            else if (autoTier === 'phone_provavel') tier = 'phone_provavel';
+            else tier = 'phone_amount';
+          }
+        }
+
+        if (!matched) {
+          matched = tryPhoneAndAmountMatch(new Set(consumedProofs), customer, enrich);
+          if (matched) tier = 'phone_amount';
+          else {
+            matched = tryNameAndAmountMatch(consumedProofs, customer, enrich);
+            if (matched) tier = 'name_amount';
+          }
         }
 
         // Tier 1.5: se ainda não bateu, tenta match provável (phone + diff 1-10%)

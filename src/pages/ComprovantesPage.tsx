@@ -28,6 +28,8 @@ interface MediaAnalysis {
   } | null;
 }
 
+export type AutoMatchTier = 'phone_amount' | 'name_amount' | 'payer_name_amount' | 'phone_provavel';
+
 interface PaymentProof {
   id: string;
   conversation_id: string;
@@ -41,7 +43,36 @@ interface PaymentProof {
   confirmed_at: string | null;
   created_at: string;
   media_analysis?: MediaAnalysis | null;
+  auto_matched_sales_id?: string | null;
+  auto_match_tier?: AutoMatchTier | null;
+  auto_matched_at?: string | null;
+  auto_match_details?: AutoMatchDetails | null;
+  payer_name?: string | null;
 }
+
+interface AutoMatchDetails {
+  pedido?: {
+    sales_id?: string;
+    cliente?: string;
+    valor?: string;
+    atraso?: string;
+    catalogo?: string;
+    customer_name_zeglam?: string;
+    phone_digits?: string;
+  };
+  reasons?: string[];
+  phone_matched?: { proof_tail?: string; zeglam_tail?: string };
+  name_matched?: { proof_name?: string; zeglam_name?: string; source?: string };
+  value_matched?: { proof?: string; zeglam?: string };
+  value_diff?: { proof?: string; zeglam?: string; abs_diff?: string; pct_diff?: string };
+}
+
+const TIER_LABEL: Record<AutoMatchTier, { label: string; color: string; bg: string }> = {
+  phone_amount: { label: 'CONFIRMADO', color: 'var(--emerald-light)', bg: 'rgba(16,185,129,0.18)' },
+  name_amount: { label: 'PROVÁVEL (nome)', color: '#3b82f6', bg: 'rgba(59,130,246,0.18)' },
+  payer_name_amount: { label: 'PROVÁVEL (pagador)', color: '#3b82f6', bg: 'rgba(59,130,246,0.18)' },
+  phone_provavel: { label: 'REVISAR', color: '#fbbf24', bg: 'rgba(251,191,36,0.18)' },
+};
 
 const statusConfig = {
   pendente: { label: 'Pendente', color: 'var(--amber)', icon: Clock, bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.2)' },
@@ -202,6 +233,45 @@ export default function ComprovantesPage() {
       setWhatsappNotifyError(e?.message || String(e));
     } finally {
       setLinkBusy(false);
+    }
+  }
+
+  /** 1-click: confirma o auto-match (já tem auto_matched_sales_id) sem abrir modal. */
+  async function confirmAutoMatch(proofId: string) {
+    setUpdating(true);
+    setWhatsappNotifyError(null);
+    setWhatsappNotifyOk(null);
+    try {
+      const proof = proofs.find((p) => p.id === proofId);
+      if (!proof || !proof.auto_matched_sales_id) { setUpdating(false); return; }
+      const payerName = proof.payer_name || proof.media_analysis?.payment_data?.payer_name || proof.customer_name;
+      const phoneDigits = (proof.customer_phone || '').replace(/\D/g, '').slice(-9);
+
+      const { data: existing } = await supabase.from('payer_aliases').select('id, use_count').eq('sales_id', proof.auto_matched_sales_id).eq('payer_name', payerName).maybeSingle();
+      if (existing) {
+        await supabase.from('payer_aliases').update({ last_used_at: new Date().toISOString(), use_count: ((existing.use_count as number) || 0) + 1, customer_phone_digits: phoneDigits || null, customer_name: proof.customer_name }).eq('id', existing.id);
+      } else {
+        await supabase.from('payer_aliases').insert({ payer_name: payerName, customer_name: proof.customer_name, customer_phone_digits: phoneDigits || null, sales_id: proof.auto_matched_sales_id, notes: `Auto-match tier ${proof.auto_match_tier}`, last_used_at: new Date().toISOString(), use_count: 1 });
+      }
+
+      const valueRaw = proof.detected_value?.trim() || proof.media_analysis?.payment_data?.value?.trim() || '';
+      const zeglam = await confirmProofPaymentInZeglam(supabase, {
+        conversation_id: proof.conversation_id,
+        customer_name: proof.customer_name,
+        detected_value: valueRaw,
+        payer_name: payerName,
+      }, { notifyCustomer: notifyZeglamOnProofConfirm, forceSalesId: proof.auto_matched_sales_id! });
+      if (!zeglam.ok) {
+        setWhatsappNotifyError(zeglam.error);
+        return;
+      }
+      await supabase.from('payment_proofs').update({ status: 'confirmado', confirmed_at: new Date().toISOString() }).eq('id', proofId);
+      setWhatsappNotifyOk('Pagamento confirmado via auto-match.');
+      await loadProofs();
+    } catch (e: any) {
+      setWhatsappNotifyError(e?.message || String(e));
+    } finally {
+      setUpdating(false);
     }
   }
 
@@ -408,6 +478,11 @@ export default function ComprovantesPage() {
                         {formatDistanceToNow(new Date(proof.created_at), { addSuffix: true, locale: ptBR })}
                       </span>
                     </div>
+                    {proof.auto_match_tier && proof.status === 'pendente' && (
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4, padding: '2px 6px', borderRadius: 6, fontSize: 9, fontWeight: 700, background: TIER_LABEL[proof.auto_match_tier].bg, color: TIER_LABEL[proof.auto_match_tier].color }}>
+                        ⚡ {TIER_LABEL[proof.auto_match_tier].label}
+                      </div>
+                    )}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
                       <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
                         {proof.detected_value || 'Valor não detectado'}
@@ -669,6 +744,53 @@ export default function ComprovantesPage() {
                       />
                       <span>Notificar cliente automaticamente ao confirmar.</span>
                     </label>
+                  {selected.auto_matched_sales_id && selected.auto_match_tier && (() => {
+                    const d = selected.auto_match_details || {};
+                    const pedido = d.pedido || {};
+                    return (
+                      <div style={{ marginBottom: 6, padding: 12, borderRadius: 10, background: TIER_LABEL[selected.auto_match_tier!].bg, border: `1px solid ${TIER_LABEL[selected.auto_match_tier!].color}40` }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: TIER_LABEL[selected.auto_match_tier!].color, letterSpacing: 0.4 }}>
+                            ⚡ AUTO-MATCH · {TIER_LABEL[selected.auto_match_tier!].label}
+                          </div>
+                          <div style={{ fontSize: 9, color: 'var(--fg-faint)' }}>Pedido <strong style={{ color: 'var(--fg-dim)' }}>{selected.auto_matched_sales_id}</strong></div>
+                        </div>
+
+                        {/* Pedido Zeglam detalhes */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8, padding: 8, borderRadius: 6, background: 'rgba(0,0,0,0.18)' }}>
+                          {pedido.cliente && (<div><div style={{ fontSize: 8, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Cliente Zeglam</div><div style={{ fontSize: 11, color: 'var(--strong-text)', fontWeight: 600 }}>{pedido.cliente}</div></div>)}
+                          {pedido.valor && (<div><div style={{ fontSize: 8, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Valor pendente</div><div style={{ fontSize: 11, color: 'var(--strong-text)', fontWeight: 600 }}>{pedido.valor}</div></div>)}
+                          {pedido.atraso && (<div><div style={{ fontSize: 8, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Atraso</div><div style={{ fontSize: 11, color: 'var(--fg-dim)' }}>{pedido.atraso}</div></div>)}
+                          {pedido.catalogo && (<div><div style={{ fontSize: 8, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Catálogo</div><div style={{ fontSize: 11, color: 'var(--fg-dim)' }}>{pedido.catalogo}</div></div>)}
+                          {pedido.customer_name_zeglam && pedido.customer_name_zeglam !== pedido.cliente && (<div style={{ gridColumn: 'span 2' }}><div style={{ fontSize: 8, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Nome cadastrado</div><div style={{ fontSize: 11, color: 'var(--fg-dim)' }}>{pedido.customer_name_zeglam}</div></div>)}
+                        </div>
+
+                        {/* Razões match */}
+                        {(d.reasons && d.reasons.length > 0) && (
+                          <div style={{ marginBottom: 8 }}>
+                            <div style={{ fontSize: 9, color: 'var(--fg-faint)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Por que combinou</div>
+                            {d.reasons.map((r, i) => (
+                              <div key={i} style={{ fontSize: 10, color: 'var(--fg-dim)', display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                                <span style={{ color: TIER_LABEL[selected.auto_match_tier!].color, flexShrink: 0 }}>✓</span><span>{r}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Diff valor se Tier3 */}
+                        {d.value_diff && (
+                          <div style={{ marginBottom: 8, fontSize: 10, color: '#fbbf24' }}>
+                            ⚠ Diferença valor: proof <strong>{d.value_diff.proof}</strong> vs Zeglam <strong>{d.value_diff.zeglam}</strong> ({d.value_diff.pct_diff})
+                          </div>
+                        )}
+
+                        <button onClick={() => confirmAutoMatch(selected.id)} disabled={updating}
+                          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 12px', borderRadius: 8, background: TIER_LABEL[selected.auto_match_tier!].color, color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
+                          <CheckCircle size={14} /> Aceitar match (1-clique)
+                        </button>
+                      </div>
+                    );
+                  })()}
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={() => updateStatus(selected.id, 'confirmado')} disabled={updating}
                       style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 16px', borderRadius: 10, background: 'var(--emerald)', color: '#fff', fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer' }}>

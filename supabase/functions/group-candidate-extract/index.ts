@@ -9,14 +9,18 @@ const corsHeaders = {
 
 const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
-// v14: INTENT_REGEX coloquial (add, poderia…) + grupo Zeglam. Demais: v13 safeguards.
-// Safeguards: (1) NENHUMA msg humano/ia ainda (conversa novissima) (2) not member (3) circuit breaker
+// v17: INTENT_REGEX strict — exige verbo de intencao explicito + objeto "grupo" proximo.
+// Falsos positivos eliminados v17:
+//  - "compra coletiva" sozinho (cliente fala de pedido anterior)
+//  - "amiga me indicou" sozinho (sem pedido entrada grupo)
+//  - "fui indicada" sozinho (pode ser pra qualquer outra coisa)
+// Match exige: (verbo intent) + (palavra grupo num raio curto) OU expressao idiomatica especifica.
 const MAX_ASK_COUNT = 2;
 const ASK_COOLDOWN_MS = 10 * 60 * 1000;
 const TEMPLATE_GRACE_MS = 5 * 60 * 1000;
 
 const INTENT_REGEX =
-  /(quero|gostaria|posso|como)\s+(de\s+)?(entrar|participar|fazer\s+parte|ingressar)|entrar\s+n[oe](?:\s+\S+)?\s+grupo|participar\s+d[oe](?:\s+\S+)?\s+grupo|fui\s+indicad[ao]|(?:uma?\s+)?(?:amiga?|amigo)\s+(?:me\s+)?indicou|indicou\s+(?:você|seu|seu\s+contato)|grupo\s+de\s+compras|compra(?:s)?\s+coletiva(?:s)?|(?:^|[\s,.!?"])(?:me\s+)?add\s+(?:no|ao|em)\s+grupo\b|poderia\s+(?:me\s+)?(?:add|incluir|cadastr(?:ar|r)?|colocar|botar)\s+(?:no|ao|em)\s+grupo\b|(?:^|[\s,.!?"])(?:me\s+)?adicion(?:a(?:r|-me)?|ei|ou)\s+(?:no|ao|em)\s+grupo\b|(?:cadastr(?:o|ar|a))\s+(?:no|em)\s+grupo\b|\bno\s+grupo\s+zeglam\b|\b(?:grupo|grupos)\s+zeglam\b/i;
+  /(?:quero|gostaria|posso|como\s+(?:faço|fazer))\s+(?:de\s+)?(?:entrar|participar|fazer\s+parte|ingressar|ser\s+adicionad[ao])(?:\s+\S+){0,4}\s+\bgrupo\b|entrar\s+n[oe]\s+grupo\b|participar\s+d[oe]\s+grupo\b|(?:^|[\s,.!?"])(?:me\s+)?(?:add|adiciona|adicionar|adicione|inclui|incluir|coloca|colocar|bota|botar|cadastra|cadastrar)\s+(?:me\s+)?(?:no|ao|em\s+um)\s+grupo\b|\b(?:link|convite)\s+(?:d[oe]\s+|do\s+|para\s+(?:entrar\s+n[oe]\s+)?)?grupo\b|\bgrupo\s+(?:de\s+)?(?:compras\s+coletivas|zeglam)\b.{0,40}(?:quero|gostaria|entrar|participar|me\s+(?:add|adiciona|incluir|coloca))|(?:quero|gostaria|posso|me\s+(?:add|adiciona|incluir))\b.{0,40}\bgrupo\s+(?:de\s+)?(?:compras\s+coletivas|zeglam)\b/i;
 
 const INTAKE_TEMPLATE_SIGNATURES = [
   'Solicito, por gentileza, o envio das seguintes informa',

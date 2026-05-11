@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   RefreshCw,
   Loader,
@@ -114,6 +114,7 @@ function pendingSortKeySid(salesId?: string): number {
 
 export default function ZeglamPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const selectConversation = useDashboardStore(s => s.selectConversation);
   const [activeTab, setActiveTab] = useState<'financeiro' | 'inadimplentes' | 'conferencia'>('inadimplentes');
   const [loading, setLoading] = useState(true);
@@ -579,6 +580,25 @@ export default function ZeglamPage() {
   };
 
   useEffect(() => { if (activeTab === 'financeiro' && !reportStats) void loadReportStats(); }, [activeTab]);
+
+  // Deep-link: ?openSales=XXXX abre modal pagamento direto. Usado por ComprovantesPage.
+  const deepLinkHandledRef = useRef<string | null>(null);
+  useEffect(() => {
+    const openSales = searchParams.get('openSales');
+    if (!openSales) return;
+    if (deepLinkHandledRef.current === openSales) return;
+    if (loading || pendingCustomers.length === 0) return;
+    deepLinkHandledRef.current = openSales;
+    setActiveTab('inadimplentes');
+    const row = pendingCustomers.find((c) => String(c.salesId) === String(openSales));
+    const convId = row?.conversationId ?? null;
+    void handleCustomerClick(String(openSales), convId);
+    // Limpa query params apos abrir
+    const next = new URLSearchParams(searchParams);
+    next.delete('openSales');
+    next.delete('proofId');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, loading, pendingCustomers, setSearchParams]);
 
   const closePaymentModal = () => {
     setIsModalOpen(false);

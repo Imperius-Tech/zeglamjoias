@@ -236,43 +236,23 @@ export default function ComprovantesPage() {
     }
   }
 
-  /** 1-click: confirma o auto-match (já tem auto_matched_sales_id) sem abrir modal. */
-  async function confirmAutoMatch(proofId: string) {
-    setUpdating(true);
-    setWhatsappNotifyError(null);
-    setWhatsappNotifyOk(null);
+  /** Abre modal "Registrar Pagamento" na ZeglamPage com salesId pre-selecionado. */
+  async function openZeglamPaymentModal(proofId: string) {
+    const proof = proofs.find((p) => p.id === proofId);
+    if (!proof || !proof.auto_matched_sales_id) return;
+    // Grava payer_alias preventivo (humano confirma no modal Zeglam)
     try {
-      const proof = proofs.find((p) => p.id === proofId);
-      if (!proof || !proof.auto_matched_sales_id) { setUpdating(false); return; }
       const payerName = proof.payer_name || proof.media_analysis?.payment_data?.payer_name || proof.customer_name;
       const phoneDigits = (proof.customer_phone || '').replace(/\D/g, '').slice(-9);
-
       const { data: existing } = await supabase.from('payer_aliases').select('id, use_count').eq('sales_id', proof.auto_matched_sales_id).eq('payer_name', payerName).maybeSingle();
       if (existing) {
         await supabase.from('payer_aliases').update({ last_used_at: new Date().toISOString(), use_count: ((existing.use_count as number) || 0) + 1, customer_phone_digits: phoneDigits || null, customer_name: proof.customer_name }).eq('id', existing.id);
       } else {
         await supabase.from('payer_aliases').insert({ payer_name: payerName, customer_name: proof.customer_name, customer_phone_digits: phoneDigits || null, sales_id: proof.auto_matched_sales_id, notes: `Auto-match tier ${proof.auto_match_tier}`, last_used_at: new Date().toISOString(), use_count: 1 });
       }
-
-      const valueRaw = proof.detected_value?.trim() || proof.media_analysis?.payment_data?.value?.trim() || '';
-      const zeglam = await confirmProofPaymentInZeglam(supabase, {
-        conversation_id: proof.conversation_id,
-        customer_name: proof.customer_name,
-        detected_value: valueRaw,
-        payer_name: payerName,
-      }, { notifyCustomer: notifyZeglamOnProofConfirm, forceSalesId: proof.auto_matched_sales_id! });
-      if (!zeglam.ok) {
-        setWhatsappNotifyError(zeglam.error);
-        return;
-      }
-      await supabase.from('payment_proofs').update({ status: 'confirmado', confirmed_at: new Date().toISOString() }).eq('id', proofId);
-      setWhatsappNotifyOk('Pagamento confirmado via auto-match.');
-      await loadProofs();
-    } catch (e: any) {
-      setWhatsappNotifyError(e?.message || String(e));
-    } finally {
-      setUpdating(false);
-    }
+    } catch (e) { console.error('alias preventivo:', e); }
+    // Navega pra ZeglamPage abrindo o modal direto
+    navigate(`/zeglam?openSales=${encodeURIComponent(proof.auto_matched_sales_id)}&proofId=${encodeURIComponent(proof.id)}`);
   }
 
   async function updateStatus(id: string, status: 'pendente' | 'confirmado' | 'rejeitado', notes?: string) {
@@ -784,9 +764,9 @@ export default function ComprovantesPage() {
                           </div>
                         )}
 
-                        <button onClick={() => confirmAutoMatch(selected.id)} disabled={updating}
+                        <button onClick={() => openZeglamPaymentModal(selected.id)} disabled={updating}
                           style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 12px', borderRadius: 8, background: TIER_LABEL[selected.auto_match_tier!].color, color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
-                          <CheckCircle size={14} /> Aceitar match (1-clique)
+                          <CheckCircle size={14} /> Abrir registro pagamento
                         </button>
                       </div>
                     );

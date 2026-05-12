@@ -884,17 +884,25 @@ export function ChatView() {
                 await sendViaEvolution({ conversationId: conv.id, text });
               } catch (err) {
                 console.error('[ChatView] evolution-send manual failed:', err);
+                const raw = err instanceof Error ? err.message : String(err);
+                let friendly = raw;
+                if (/duplicate_blocked|mesmo texto enviado/i.test(raw)) friendly = 'Mesma mensagem já enviada recentemente. Aguarde antes de repetir ou edite o texto.';
+                else if (/rate_limited|hourly_limit|minute_limit/i.test(raw)) friendly = 'Limite anti-ban atingido. Aguarde alguns minutos antes de enviar.';
+                else if (/recipient_blocklisted/i.test(raw)) friendly = 'Cliente está na blocklist. Remova da lista antes de enviar.';
+                else if (/no_prior_interaction/i.test(raw)) friendly = 'Cliente nunca interagiu antes. Aguarde uma mensagem dele primeiro.';
+                else if (/Instance disabled/i.test(raw)) friendly = 'Instância Evolution desabilitada na configuração anti-ban.';
+                else friendly = `Não foi possível enviar: ${raw}`;
                 useDashboardStore.setState((state) => ({
                   conversations: state.conversations.map((c) =>
                     c.id === conv.id
                       ? {
                         ...c,
-                        messages: c.messages.map((m) => m.id === tempId ? { ...m, status: 'error' } : m),
+                        messages: c.messages.map((m) => m.id === tempId ? { ...m, status: 'error', errorMessage: friendly } : m),
                       }
                       : c
                   ),
                 }));
-                window.alert('Não foi possível enviar a mensagem no WhatsApp. Verifique a instância Evolution e tente novamente.');
+                window.alert(friendly);
               }
             })();
           }}
